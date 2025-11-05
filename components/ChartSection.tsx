@@ -195,10 +195,21 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           return;
         }
 
-        if (!chart || !chartRef.current) {
-          console.log("Chart not initialized");
+        // Check if chart still exists (might have been unmounted)
+        if (!chartRef.current) {
+          console.log("Chart was unmounted");
           setLoading(false);
           return;
+        }
+
+        // Remove old series if exists
+        if (seriesRef.current && chartRef.current) {
+          try {
+            chartRef.current.removeSeries(seriesRef.current);
+            seriesRef.current = null;
+          } catch (e) {
+            // Series might already be removed
+          }
         }
 
         // Calculate price change
@@ -212,7 +223,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
         // Set price scale precision based on price
         const decimals = getPriceDecimals(lastPrice);
-        chart.priceScale("right").applyOptions({
+        chartRef.current.priceScale("right").applyOptions({
           autoScale: true,
           scaleMargins: {
             top: 0.1,
@@ -221,7 +232,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         });
 
         if (chartType === "candlestick") {
-          const candlestickSeries = chart.addCandlestickSeries({
+          const candlestickSeries = chartRef.current.addCandlestickSeries({
             upColor: "#10b981",
             downColor: "#ef4444",
             borderVisible: false,
@@ -246,7 +257,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           seriesRef.current = candlestickSeries;
           currentDataRef.current = candleData;
         } else {
-          const lineSeries = chart.addLineSeries({
+          const lineSeries = chartRef.current.addLineSeries({
             color: "#8b5cf6",
             lineWidth: 2,
             priceFormat: {
@@ -265,7 +276,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           seriesRef.current = lineSeries;
         }
 
-        chart.timeScale().fitContent();
+        chartRef.current.timeScale().fitContent();
       } catch (error) {
         console.error("Error loading chart data:", error);
       } finally {
@@ -288,7 +299,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     return () => {
       window.removeEventListener("resize", handleResize);
       if (chartRef.current) {
-        chart.remove();
+        chartRef.current.remove();
         chartRef.current = null;
         seriesRef.current = null;
       }
