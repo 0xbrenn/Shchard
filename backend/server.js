@@ -153,7 +153,6 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
   }
 
   const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
-  const reserves = await pairContract.getReserves();
   const token0 = await pairContract.token0();
   const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
 
@@ -163,10 +162,24 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
   console.log(`  Fetching from block ${startBlock} to ${currentBlock}`);
 
   const filter = pairContract.filters.Swap();
-  const events = await pairContract.queryFilter(filter, startBlock, currentBlock);
+  const CHUNK_SIZE = 10000; // OPN Chain limit
+  const allEvents = [];
+
+  // Fetch in chunks to respect RPC limits
+  for (let from = startBlock; from <= currentBlock; from += CHUNK_SIZE) {
+    const to = Math.min(from + CHUNK_SIZE - 1, currentBlock);
+    console.log(`    Chunk: ${from} to ${to}`);
+
+    try {
+      const events = await pairContract.queryFilter(filter, from, to);
+      allEvents.push(...events);
+    } catch (error) {
+      console.error(`    Failed to fetch chunk ${from}-${to}:`, error.message);
+    }
+  }
 
   const swaps = [];
-  for (const event of events) {
+  for (const event of allEvents) {
     const swap = await processSwapEvent(event, tokenAddress, isToken0);
     if (swap) swaps.push(swap);
   }
