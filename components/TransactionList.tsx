@@ -86,11 +86,11 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
   return (
     <div className="h-full flex flex-col glass-strong">
-      <div className="px-6 py-4 border-b border-[rgba(236,72,153,0.3)] flex items-center justify-between">
-        <h3 className="text-lg font-semibold gradient-text">Transactions</h3>
+      <div className="px-6 py-4 border-b flex items-center justify-between" style={{borderColor: 'var(--border-subtle)'}}>
+        <h3 className="text-lg font-semibold gradient-text">Recent Transactions</h3>
         {tokenAddress && transactions.length > 0 && (
-          <span className="text-sm text-gray-400">
-            {transactions.length} recent swaps
+          <span className="text-sm" style={{color: 'var(--text-secondary)'}}>
+            {transactions.length} swaps
           </span>
         )}
       </div>
@@ -120,12 +120,12 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
       ) : (
         <div className="flex-1 overflow-hidden">
           {/* Table Header */}
-          <div className="px-6 py-3 grid grid-cols-6 gap-4 text-xs text-gray-400 font-semibold border-b border-[rgba(139,92,246,0.3)]">
-            <div>Type</div>
-            <div className="col-span-2 text-right">Token Amount</div>
-            <div className="text-right">Price (USD)</div>
-            <div className="text-right">Total Value</div>
-            <div className="text-right">Time</div>
+          <div className="px-6 py-3 grid grid-cols-6 gap-4 text-xs font-semibold border-b" style={{color: 'var(--text-secondary)', borderColor: 'var(--border-subtle)'}}>
+            <div>TYPE</div>
+            <div className="col-span-2 text-right">AMOUNT</div>
+            <div className="text-right">PRICE</div>
+            <div className="text-right">TOTAL</div>
+            <div className="text-right">TIME</div>
           </div>
 
           {/* Table Body */}
@@ -145,8 +145,8 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
                   <span
                     className={`px-3 py-1.5 rounded-md text-xs font-bold ${
                       tx.type === "buy"
-                        ? "bg-green-500/20 text-green-400 border border-green-500/40"
-                        : "bg-red-500/20 text-red-400 border border-red-500/40"
+                        ? "badge-positive"
+                        : "badge-negative"
                     }`}
                   >
                     {tx.type === "buy" ? "BUY" : "SELL"}
@@ -155,28 +155,28 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                 {/* Token Amount */}
                 <div className="col-span-2 text-right flex flex-col justify-center">
-                  <div className="font-medium">{tx.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</div>
-                  <div className="text-xs text-gray-500">tokens</div>
+                  <div className="font-medium data-number">{tx.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</div>
+                  <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>tokens</div>
                 </div>
 
                 {/* Price */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="font-medium text-purple-400">{formatPrice(tx.price)}</div>
-                  <div className="text-xs text-gray-500">per token</div>
+                  <div className="font-medium data-number" style={{color: 'var(--color-info)'}}>{formatPrice(tx.price)}</div>
+                  <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>per token</div>
                 </div>
 
                 {/* Total Value */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="font-bold text-white">${tx.volume.toFixed(2)}</div>
-                  <div className="text-xs text-gray-500">total</div>
+                  <div className="font-bold text-white data-number">${tx.volume.toFixed(2)}</div>
+                  <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>total</div>
                 </div>
 
                 {/* Time */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="text-sm text-blue-400">
+                  <div className="text-sm" style={{color: 'var(--text-secondary)'}}>
                     {formatDistanceToNow(new Date(tx.timestamp * 1000), { addSuffix: true })}
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>
                     {new Date(tx.timestamp * 1000).toLocaleTimeString()}
                   </div>
                 </div>
