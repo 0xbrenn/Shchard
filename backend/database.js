@@ -1,5 +1,9 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Initialize database
 const dbPath = path.join(__dirname, 'shchard.db');
@@ -299,30 +303,31 @@ function getCandles(tokenAddress, timeframe, limit = 1000) {
   return candleQueries.getByTokenAndTimeframe.all(tokenAddress, timeframe, limit);
 }
 
-module.exports = {
+export {
   db,
   initializeDatabase,
 
   // Token functions
   upsertToken,
-  getToken: (address) => tokenQueries.getByAddress.get(address),
-  getAllTokens: () => tokenQueries.getAll.all(),
+  getAllTokens,
 
   // Pair functions
   upsertPair,
-  getPair: (address) => pairQueries.getByAddress.get(address),
-  getAllPairs: () => pairQueries.getAll.all(),
-  getTokenPair: (tokenAddress) => pairQueries.getByToken.get(tokenAddress, tokenAddress),
+  getAllPairs,
 
   // Swap functions
   insertSwap,
   insertSwapsBatch,
   getTokenSwaps,
   getLastIndexedBlock,
-  getSwapsInRange: (tokenAddress, startTime, endTime) =>
-    swapQueries.getSwapsInRange.all(tokenAddress, startTime, endTime),
 
   // Candle functions
   buildAndSaveCandles,
   getCandles
 };
+
+export const getToken = (address) => tokenQueries.getByAddress.get(address);
+export const getPair = (address) => pairQueries.getByAddress.get(address);
+export const getTokenPair = (tokenAddress) => pairQueries.getByToken.get(tokenAddress, tokenAddress);
+export const getSwapsInRange = (tokenAddress, startTime, endTime) =>
+  swapQueries.getSwapsInRange.all(tokenAddress, startTime, endTime);

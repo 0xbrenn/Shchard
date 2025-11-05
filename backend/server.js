@@ -4,6 +4,7 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import dotenv from 'dotenv';
+import * as db from './database.js';
 
 dotenv.config();
 
@@ -13,6 +14,10 @@ const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json());
+
+// Initialize database
+db.initializeDatabase();
+console.log('✅ Database ready');
 
 // Configuration
 const OPN_RPC = process.env.OPN_RPC || 'https://testnet-rpc.iopn.tech';
@@ -32,8 +37,7 @@ const FACTORY_ABI = [
   'function getPair(address tokenA, address tokenB) view returns (address pair)'
 ];
 
-// In-memory data store
-const swapDataStore = new Map(); // tokenAddress -> { swaps: [], lastIndexed: blockNumber }
+// Pair cache for fast lookups
 const pairCache = new Map(); // tokenAddress -> pairAddress
 
 // HTTP provider for queries
@@ -154,12 +158,27 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
 
   const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
   const token0 = await pairContract.token0();
+  const token1 = await pairContract.token1();
   const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
 
+  // Check if we've already indexed this token
+  const lastIndexed = db.getLastIndexedBlock(tokenAddress);
+
   const currentBlock = await provider.getBlockNumber();
-  const startBlock = fromBlock || Math.max(0, currentBlock - 50000); // Last 50k blocks
+  const startBlock = fromBlock || lastIndexed || Math.max(0, currentBlock - 50000); // Last 50k blocks
 
   console.log(`  Fetching from block ${startBlock} to ${currentBlock}`);
+
+  // Save pair info to database
+  db.upsertPair({
+    address: pairAddress,
+    token0,
+    token1,
+    token0Symbol: isToken0 ? 'TOKEN' : 'WOPN',
+    token1Symbol: isToken0 ? 'WOPN' : 'TOKEN',
+    reserve0: '0',
+    reserve1: '0'
+  });
 
   const filter = pairContract.filters.Swap();
   const CHUNK_SIZE = 10000; // OPN Chain limit
@@ -178,25 +197,32 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
     }
   }
 
-  const swaps = [];
+  const swapsToInsert = [];
   for (const event of allEvents) {
     const swap = await processSwapEvent(event, tokenAddress, isToken0);
-    if (swap) swaps.push(swap);
+    if (swap) {
+      swapsToInsert.push({
+        txHash: swap.txHash,
+        pairAddress: pairAddress,
+        tokenAddress: tokenAddress.toLowerCase(),
+        blockNumber: swap.blockNumber,
+        timestamp: swap.timestamp,
+        price: swap.price,
+        volume: swap.volume,
+        type: swap.type,
+        tokenAmount: swap.tokenAmount,
+        wopnAmount: swap.wopnAmount
+      });
+    }
   }
 
-  // Sort by timestamp
-  swaps.sort((a, b) => a.timestamp - b.timestamp);
+  // Batch insert swaps into database
+  if (swapsToInsert.length > 0) {
+    db.insertSwapsBatch(swapsToInsert);
+  }
 
-  // Store in memory
-  swapDataStore.set(tokenAddress.toLowerCase(), {
-    swaps,
-    lastIndexed: currentBlock,
-    pairAddress,
-    isToken0
-  });
-
-  console.log(`✅ Indexed ${swaps.length} swaps for ${tokenAddress}`);
-  return swaps;
+  console.log(`✅ Indexed ${swapsToInsert.length} swaps for ${tokenAddress}`);
+  return swapsToInsert;
 }
 
 // Subscribe to real-time swaps
@@ -223,10 +249,27 @@ async function subscribeToRealTimeSwaps(tokenAddress) {
       if (swap) {
         console.log(`🔥 New swap detected for ${tokenAddress}`);
 
-        // Add to store
-        const data = swapDataStore.get(tokenAddress.toLowerCase());
-        if (data) {
-          data.swaps.push(swap);
+        // Save to database
+        const swapData = {
+          txHash: swap.txHash,
+          pairAddress,
+          tokenAddress: tokenAddress.toLowerCase(),
+          blockNumber: swap.blockNumber,
+          timestamp: swap.timestamp,
+          price: swap.price,
+          volume: swap.volume,
+          type: swap.type,
+          tokenAmount: swap.tokenAmount,
+          wopnAmount: swap.wopnAmount
+        };
+
+        try {
+          db.insertSwap(swapData);
+        } catch (error) {
+          // Ignore duplicate errors
+          if (!error.message.includes('UNIQUE')) {
+            console.error('Error saving swap:', error.message);
+          }
         }
 
         // Broadcast to all connected WebSocket clients
@@ -312,24 +355,35 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
       '1W': 7 * 24 * 60 * 60
     };
 
-    let data = swapDataStore.get(tokenAddress.toLowerCase());
+    // Check if we have data in database
+    let swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
 
-    if (!data || data.swaps.length === 0) {
+    if (swaps.length === 0) {
       // Index if not already
       await indexTokenSwaps(tokenAddress);
-      data = swapDataStore.get(tokenAddress.toLowerCase());
+      await subscribeToRealTimeSwaps(tokenAddress);
+      swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
     }
 
-    if (!data || data.swaps.length === 0) {
+    if (swaps.length === 0) {
       return res.json({ candles: [], transactions: [] });
     }
 
-    const intervalSeconds = timeframeMap[timeframe] || 3600;
-    const candles = buildCandles(data.swaps, intervalSeconds);
+    // Try to get pre-calculated candles from database
+    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 1000);
+
+    if (candles.length === 0) {
+      // Build and save candles
+      const intervalSeconds = timeframeMap[timeframe] || 3600;
+      candles = db.buildAndSaveCandles(tokenAddress.toLowerCase(), timeframe, intervalSeconds);
+    }
+
+    // Get recent transactions (last 50, newest first)
+    const transactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
 
     res.json({
-      candles,
-      transactions: data.swaps.slice(-50).reverse() // Last 50, newest first
+      candles: candles.reverse(), // Oldest to newest for chart
+      transactions // Already newest first from DB
     });
 
   } catch (error) {
@@ -342,15 +396,15 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
 app.get('/api/token/:tokenAddress', async (req, res) => {
   try {
     const { tokenAddress } = req.params;
-    const data = swapDataStore.get(tokenAddress.toLowerCase());
+    const swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 1000);
 
-    if (!data || data.swaps.length === 0) {
-      return res.json({ price: 0, volume24h: 0 });
+    if (swaps.length === 0) {
+      return res.json({ price: 0, volume24h: 0, lastUpdate: 0 });
     }
 
-    const latestSwap = data.swaps[data.swaps.length - 1];
+    const latestSwap = swaps[0]; // Newest first from DB
     const oneDayAgo = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
-    const recent = data.swaps.filter(s => s.timestamp >= oneDayAgo);
+    const recent = swaps.filter(s => s.timestamp >= oneDayAgo);
     const volume24h = recent.reduce((sum, s) => sum + s.volume, 0);
 
     res.json({
