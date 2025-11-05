@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, CandlestickData, LineData, ISeriesApi, UTCTimestamp } from "lightweight-charts";
 import { fetchChartData as fetchBackendChartData, BackendWebSocket, SwapUpdate } from "@/lib/backendService";
 
-type Timeframe = "5M" | "15M" | "1H" | "4H" | "1D" | "1W";
+type Timeframe = "1M" | "5M" | "15M" | "1H" | "4H" | "1D" | "1W";
 
 interface ChartSectionProps {
   tokenAddress: string | null;
@@ -94,6 +94,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
   const getTimeframeSeconds = (tf: Timeframe): number => {
     const map: Record<Timeframe, number> = {
+      "1M": 60,
       "5M": 5 * 60,
       "15M": 15 * 60,
       "1H": 60 * 60,
@@ -206,13 +207,33 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           return;
         }
 
-        const candles = response.candles.filter(c => c && c.time && typeof c.open === 'number');
+        // Filter and validate candle data
+        const candles = response.candles.filter(c => {
+          if (!c || !c.time) return false;
+          // For line chart, we only need close price
+          if (chartType === 'line') {
+            return typeof c.close === 'number' || !isNaN(parseFloat(c.close));
+          }
+          // For candlestick, we need all OHLC values
+          return (typeof c.open === 'number' || !isNaN(parseFloat(c.open))) &&
+                 (typeof c.close === 'number' || !isNaN(parseFloat(c.close)));
+        }).map(c => ({
+          ...c,
+          time: typeof c.time === 'number' ? c.time : parseInt(c.time),
+          open: typeof c.open === 'number' ? c.open : parseFloat(c.open),
+          high: typeof c.high === 'number' ? c.high : parseFloat(c.high),
+          low: typeof c.low === 'number' ? c.low : parseFloat(c.low),
+          close: typeof c.close === 'number' ? c.close : parseFloat(c.close),
+          volume: typeof c.volume === 'number' ? c.volume : parseFloat(c.volume || 0)
+        }));
 
         if (candles.length === 0) {
           console.log("No valid candle data after filtering");
           setLoading(false);
           return;
         }
+
+        console.log(`✅ Loaded ${candles.length} candles for ${chartType} chart`);
 
         // Check if chart still exists (might have been unmounted)
         if (!chartRef.current) {
@@ -345,7 +366,31 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     };
   }, [chartType, timeframe, tokenAddress]);
 
-  const timeframes: Timeframe[] = ["5M", "15M", "1H", "4H", "1D", "1W"];
+  const timeframes: Timeframe[] = ["1M", "5M", "15M", "1H", "4H", "1D", "1W"];
+
+  // Time range zoom options (like TradingView)
+  const handleTimeRange = (range: string) => {
+    if (!chartRef.current) return;
+
+    const timeScale = chartRef.current.timeScale();
+    const now = Math.floor(Date.now() / 1000);
+
+    let from: number;
+    switch (range) {
+      case '1H': from = now - 3600; break;
+      case '4H': from = now - 4 * 3600; break;
+      case '1D': from = now - 24 * 3600; break;
+      case '3D': from = now - 3 * 24 * 3600; break;
+      case '1W': from = now - 7 * 24 * 3600; break;
+      case '1M': from = now - 30 * 24 * 3600; break;
+      case 'ALL':
+        timeScale.fitContent();
+        return;
+      default: return;
+    }
+
+    timeScale.setVisibleRange({ from: from as UTCTimestamp, to: now as UTCTimestamp });
+  };
 
   return (
     <div className="flex-1 flex flex-col glass-strong border-b border-[rgba(236,72,153,0.2)]">
@@ -402,47 +447,66 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       )}
 
       {/* Chart Controls */}
-      <div className="px-4 py-3 border-b border-[rgba(236,72,153,0.2)] flex items-center justify-between">
-        <div className="flex gap-2">
-          {timeframes.map((tf) => (
+      <div className="px-4 py-3 border-b border-[rgba(236,72,153,0.2)]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex gap-2">
+            {timeframes.map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                disabled={!tokenAddress}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+                  timeframe === tf
+                    ? "btn-gradient text-white glow-purple"
+                    : "glass text-gray-400 hover:text-white"
+                } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
             <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
+              onClick={() => setChartType("candlestick")}
               disabled={!tokenAddress}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-                timeframe === tf
-                  ? "btn-gradient text-white glow-purple"
+                chartType === "candlestick"
+                  ? "btn-gradient text-white glow-pink"
                   : "glass text-gray-400 hover:text-white"
               } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
             >
-              {tf}
+              📊 Candlestick
             </button>
-          ))}
+            <button
+              onClick={() => setChartType("line")}
+              disabled={!tokenAddress}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+                chartType === "line"
+                  ? "btn-gradient text-white glow-blue"
+                  : "glass text-gray-400 hover:text-white"
+              } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              📈 Line
+            </button>
+          </div>
         </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={() => setChartType("candlestick")}
-            disabled={!tokenAddress}
-            className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-              chartType === "candlestick"
-                ? "btn-gradient text-white glow-pink"
-                : "glass text-gray-400 hover:text-white"
-            } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            📊 Candlestick
-          </button>
-          <button
-            onClick={() => setChartType("line")}
-            disabled={!tokenAddress}
-            className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-              chartType === "line"
-                ? "btn-gradient text-white glow-blue"
-                : "glass text-gray-400 hover:text-white"
-            } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            📈 Line
-          </button>
+        {/* Time Range Zoom Controls */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400 mr-2">Time Range:</span>
+          {['1H', '4H', '1D', '3D', '1W', '1M', 'ALL'].map((range) => (
+            <button
+              key={range}
+              onClick={() => handleTimeRange(range)}
+              disabled={!tokenAddress}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-all glass text-gray-400 hover:text-white hover:border-glow ${
+                !tokenAddress ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              {range}
+            </button>
+          ))}
         </div>
       </div>
 
