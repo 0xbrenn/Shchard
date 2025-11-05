@@ -59,6 +59,17 @@ async function connectWebSocket() {
 
     wsProvider = new ethers.WebSocketProvider(OPN_WS);
 
+    // Set up reconnection handlers
+    wsProvider.on('error', (error) => {
+      console.error('❌ WebSocket error:', error.message);
+    });
+
+    wsProvider.on('close', () => {
+      console.log('⚠️ WebSocket closed, reconnecting in 5 seconds...');
+      wsProvider = null;
+      setTimeout(connectWebSocket, 5000);
+    });
+
     // Wait a bit to see if connection succeeds
     await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -225,9 +236,20 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
   return swapsToInsert;
 }
 
+// Keep track of subscribed tokens
+const subscribedTokens = new Set();
+
 // Subscribe to real-time swaps
 async function subscribeToRealTimeSwaps(tokenAddress) {
   try {
+    const lowerToken = tokenAddress.toLowerCase();
+
+    // Don't subscribe twice
+    if (subscribedTokens.has(lowerToken)) {
+      console.log(`✓ Already subscribed to ${tokenAddress}`);
+      return;
+    }
+
     if (!wsProvider) {
       console.log(`⚠️ WebSocket not connected, will retry subscription for ${tokenAddress} later`);
       // Retry after 10 seconds
@@ -236,18 +258,34 @@ async function subscribeToRealTimeSwaps(tokenAddress) {
     }
 
     const pairAddress = await findPair(tokenAddress);
-    if (!pairAddress) return;
+    if (!pairAddress) {
+      console.log(`⚠️ No pair found for ${tokenAddress}`);
+      return;
+    }
+
+    console.log(`🔍 Setting up listener for pair ${pairAddress} (token: ${tokenAddress})`);
 
     const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, wsProvider);
     const token0 = await pairContract.token0();
+    const token1 = await pairContract.token1();
     const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
 
+    console.log(`   Token0: ${token0}`);
+    console.log(`   Token1: ${token1}`);
+    console.log(`   Watching token: ${tokenAddress} (is token${isToken0 ? '0' : '1'})`);
+
     pairContract.on('Swap', async (...args) => {
+      console.log(`📡 Swap event received on pair ${pairAddress}`);
       const event = args[args.length - 1];
       const swap = await processSwapEvent(event, tokenAddress, isToken0);
 
       if (swap) {
-        console.log(`🔥 New swap detected for ${tokenAddress}`);
+        console.log(`🔥 New swap detected for ${tokenAddress}:`, {
+          price: swap.price,
+          volume: swap.volume,
+          type: swap.type,
+          txHash: swap.txHash
+        });
 
         // Save to database
         const swapData = {
@@ -265,6 +303,7 @@ async function subscribeToRealTimeSwaps(tokenAddress) {
 
         try {
           db.insertSwap(swapData);
+          console.log(`💾 Saved swap to database`);
         } catch (error) {
           // Ignore duplicate errors
           if (!error.message.includes('UNIQUE')) {
@@ -273,11 +312,16 @@ async function subscribeToRealTimeSwaps(tokenAddress) {
         }
 
         // Broadcast to all connected WebSocket clients
+        const clientCount = wss.clients.size;
         broadcastSwap(tokenAddress, swap);
+        console.log(`📤 Broadcast to ${clientCount} WebSocket clients`);
+      } else {
+        console.log(`⚠️ Swap event processed but returned null`);
       }
     });
 
-    console.log(`🔌 Subscribed to real-time swaps for ${tokenAddress}`);
+    subscribedTokens.add(lowerToken);
+    console.log(`🔌 Subscribed to real-time swaps for ${tokenAddress} at pair ${pairAddress}`);
   } catch (error) {
     console.error(`Failed to subscribe to swaps for ${tokenAddress}:`, error.message);
     // Retry after 10 seconds
@@ -490,7 +534,7 @@ app.post('/api/index/:tokenAddress', async (req, res) => {
 
 // WebSocket connection handler
 wss.on('connection', (ws) => {
-  console.log('👤 New WebSocket client connected');
+  console.log('👤 New WebSocket client connected (total clients:', wss.clients.size + ')');
 
   ws.on('message', async (message) => {
     try {
@@ -499,17 +543,23 @@ wss.on('connection', (ws) => {
       if (data.type === 'subscribe' && data.tokenAddress) {
         console.log(`📡 Client subscribing to ${data.tokenAddress}`);
 
-        // Ensure token is indexed and subscribed
-        let stored = swapDataStore.get(data.tokenAddress.toLowerCase());
-        if (!stored) {
+        // Check if we have data for this token
+        const swaps = db.getTokenSwaps(data.tokenAddress.toLowerCase(), 1);
+
+        if (swaps.length === 0) {
+          console.log(`   No data found, indexing ${data.tokenAddress}...`);
           await indexTokenSwaps(data.tokenAddress);
-          await subscribeToRealTimeSwaps(data.tokenAddress);
         }
+
+        // Subscribe to real-time updates
+        await subscribeToRealTimeSwaps(data.tokenAddress);
 
         ws.send(JSON.stringify({
           type: 'subscribed',
           tokenAddress: data.tokenAddress
         }));
+
+        console.log(`   ✓ Client subscribed to ${data.tokenAddress}`);
       }
     } catch (error) {
       console.error('WebSocket message error:', error);
@@ -517,7 +567,16 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log('👋 Client disconnected');
+    console.log('👋 Client disconnected (remaining clients:', wss.clients.size - 1 + ')');
+  });
+});
+
+// Status endpoint to check subscriptions
+app.get('/api/status', (req, res) => {
+  res.json({
+    wsConnected: wsProvider !== null,
+    subscribedTokens: Array.from(subscribedTokens),
+    connectedClients: wss.clients.size
   });
 });
 
@@ -530,7 +589,14 @@ server.listen(PORT, async () => {
 
   // Index WOPN on startup
   setTimeout(() => {
+    console.log(`🏁 Starting WOPN indexing and subscription...`);
     indexTokenSwaps(WOPN_ADDRESS);
     subscribeToRealTimeSwaps(WOPN_ADDRESS);
   }, 2000);
+
+  // Heartbeat every 30 seconds to show we're alive
+  setInterval(() => {
+    const status = wsProvider ? '🟢 CONNECTED' : '🔴 DISCONNECTED';
+    console.log(`💓 Heartbeat - WebSocket: ${status}, Subscribed: ${subscribedTokens.size} tokens, Clients: ${wss.clients.size}`);
+  }, 30000);
 });
