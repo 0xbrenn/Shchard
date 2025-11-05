@@ -5,6 +5,8 @@ import { formatDistanceToNow } from "date-fns";
 import { fetchTokenTransactions } from "@/lib/tokenService";
 import { Transaction } from "@/lib/types";
 import { OPN_CHAIN_CONFIG } from "@/lib/config";
+import { getWebSocketService, SwapEvent } from "@/lib/websocketService";
+import { findTokenPair, getPairReserves } from "@/lib/web3";
 
 interface TransactionListProps {
   tokenAddress: string | null;
@@ -13,7 +15,9 @@ interface TransactionListProps {
 export default function TransactionList({ tokenAddress }: TransactionListProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [newTxHighlight, setNewTxHighlight] = useState<string | null>(null);
 
+  // Load historical transactions
   useEffect(() => {
     if (!tokenAddress) {
       setTransactions([]);
@@ -33,6 +37,64 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
     };
 
     loadTransactions();
+  }, [tokenAddress]);
+
+  // Subscribe to real-time transactions
+  useEffect(() => {
+    if (!tokenAddress) return;
+
+    const setupLiveTransactions = async () => {
+      try {
+        const pairAddress = await findTokenPair(tokenAddress);
+        if (!pairAddress) return;
+
+        const reserves = await getPairReserves(pairAddress);
+        const isToken0 = reserves.token0.toLowerCase() === tokenAddress.toLowerCase();
+
+        const wsService = getWebSocketService();
+
+        const handleNewSwap = (swap: SwapEvent) => {
+          console.log("📋 New transaction received:", swap);
+
+          // Create new transaction from swap
+          const newTx: Transaction = {
+            type: swap.type,
+            amount: swap.amount,
+            price: `$${swap.price.toFixed(8)}`,
+            total: `$${(parseFloat(swap.amount) * swap.price).toFixed(2)}`,
+            timestamp: new Date(swap.timestamp * 1000),
+            txHash: swap.txHash,
+            from: "",
+            to: "",
+          };
+
+          // Add to top of list
+          setTransactions(prev => [newTx, ...prev.slice(0, 19)]);
+
+          // Highlight new transaction
+          setNewTxHighlight(swap.txHash);
+          setTimeout(() => setNewTxHighlight(null), 3000);
+        };
+
+        // Subscribe to swaps (reuse the same WebSocket connection)
+        await wsService.subscribeToSwaps(tokenAddress, pairAddress, isToken0, handleNewSwap);
+
+      } catch (error) {
+        console.error("Failed to setup live transactions:", error);
+      }
+    };
+
+    setupLiveTransactions();
+
+    return () => {
+      if (tokenAddress) {
+        findTokenPair(tokenAddress).then(pairAddress => {
+          if (pairAddress) {
+            getWebSocketService().unsubscribe(tokenAddress, pairAddress);
+          }
+        });
+      }
+    };
   }, [tokenAddress]);
 
   return (
@@ -75,7 +137,9 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
                 href={`${OPN_CHAIN_CONFIG.explorerUrl}/tx/${tx.txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="grid grid-cols-3 gap-2 text-sm py-3 hover:bg-[#0a0e1a] rounded px-2 -mx-2 cursor-pointer transition-colors border-b border-[#1e2639]/50"
+                className={`grid grid-cols-3 gap-2 text-sm py-3 hover:bg-[#0a0e1a] rounded px-2 -mx-2 cursor-pointer transition-all border-b border-[#1e2639]/50 ${
+                  newTxHighlight === tx.txHash ? "bg-blue-500/20 animate-pulse" : ""
+                }`}
               >
                 <div>
                   <span
