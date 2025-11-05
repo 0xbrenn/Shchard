@@ -11,20 +11,35 @@ export default function Home() {
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
+      {/* Header */}
       <Header onTokenSelect={setSelectedToken} />
 
+      {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar selectedToken={selectedToken} />
+        {/* Sidebar */}
+        <Sidebar selectedToken={selectedToken} onTokenSelect={setSelectedToken} />
 
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <ChartSection tokenAddress={selectedToken} />
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-            <TokenInfo tokenAddress={selectedToken} />
-            <TransactionList tokenAddress={selectedToken} />
+        {/* Main Chart and Data Area */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left: Chart Area */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <ChartSection tokenAddress={selectedToken} />
           </div>
-        </main>
+
+          {/* Right: Token Info and Transactions */}
+          <div className="w-96 flex flex-col overflow-hidden bg-[#131925] border-l border-[#1e2639]">
+            {/* Token Info - Fixed height */}
+            <div className="flex-shrink-0 overflow-y-auto">
+              <TokenInfo tokenAddress={selectedToken} />
+            </div>
+
+            {/* Transactions - Takes remaining space */}
+            <div className="flex-1 overflow-hidden">
+              <TransactionList tokenAddress={selectedToken} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
