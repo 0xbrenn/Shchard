@@ -15,18 +15,37 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
   const [newTxHighlight, setNewTxHighlight] = useState<string | null>(null);
   const wsRef = useRef<BackendWebSocket | null>(null);
 
+  // Helper to safely convert to number
+  const toNumber = (value: any): number => {
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    return isNaN(num) ? 0 : num;
+  };
+
   // Helper to format price with proper decimals
-  const formatPrice = (price: number): string => {
-    if (price === 0) return "$0.00";
-    if (price < 0.000001) return `$${price.toFixed(10)}`;
-    if (price < 0.00001) return `$${price.toFixed(9)}`;
-    if (price < 0.0001) return `$${price.toFixed(8)}`;
-    if (price < 0.001) return `$${price.toFixed(7)}`;
-    if (price < 0.01) return `$${price.toFixed(6)}`;
-    if (price < 0.1) return `$${price.toFixed(5)}`;
-    if (price < 1) return `$${price.toFixed(4)}`;
-    if (price < 10) return `$${price.toFixed(3)}`;
-    return `$${price.toFixed(2)}`;
+  const formatPrice = (price: number | string): string => {
+    const p = toNumber(price);
+    if (p === 0) return "$0.00";
+    if (p < 0.000001) return `$${p.toFixed(10)}`;
+    if (p < 0.00001) return `$${p.toFixed(9)}`;
+    if (p < 0.0001) return `$${p.toFixed(8)}`;
+    if (p < 0.001) return `$${p.toFixed(7)}`;
+    if (p < 0.01) return `$${p.toFixed(6)}`;
+    if (p < 0.1) return `$${p.toFixed(5)}`;
+    if (p < 1) return `$${p.toFixed(4)}`;
+    if (p < 10) return `$${p.toFixed(3)}`;
+    return `$${p.toFixed(2)}`;
+  };
+
+  // Helper to format token amount
+  const formatTokenAmount = (amount: number | string): string => {
+    const a = toNumber(amount);
+    return a.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  };
+
+  // Helper to format volume
+  const formatVolume = (volume: number | string): string => {
+    const v = toNumber(volume);
+    return `$${v.toFixed(2)}`;
   };
 
   // Load historical transactions from backend
@@ -155,7 +174,7 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                 {/* Token Amount */}
                 <div className="col-span-2 text-right flex flex-col justify-center">
-                  <div className="font-medium data-number">{tx.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</div>
+                  <div className="font-medium data-number">{formatTokenAmount(tx.tokenAmount)}</div>
                   <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>tokens</div>
                 </div>
 
@@ -167,7 +186,7 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                 {/* Total Value */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="font-bold text-white data-number">${tx.volume.toFixed(2)}</div>
+                  <div className="font-bold text-white data-number">{formatVolume(tx.volume)}</div>
                   <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>total</div>
                 </div>
 
