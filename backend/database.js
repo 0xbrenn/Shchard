@@ -12,7 +12,7 @@ const db = new Database(dbPath);
 // Enable WAL mode for better concurrent access
 db.pragma('journal_mode = WAL');
 
-// Create tables
+// Create tables immediately to ensure they exist for prepared statements
 function initializeDatabase() {
   // Tokens table
   db.exec(`
@@ -85,6 +85,9 @@ function initializeDatabase() {
 
   console.log('✅ Database initialized');
 }
+
+// Initialize database immediately so tables exist for prepared statements
+initializeDatabase();
 
 // Token operations
 const tokenQueries = {
@@ -301,6 +304,14 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
 
 function getCandles(tokenAddress, timeframe, limit = 1000) {
   return candleQueries.getByTokenAndTimeframe.all(tokenAddress, timeframe, limit);
+}
+
+function getAllTokens() {
+  return tokenQueries.getAll.all();
+}
+
+function getAllPairs() {
+  return pairQueries.getAll.all();
 }
 
 export {
