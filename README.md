@@ -64,14 +64,29 @@ pnpm dev
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Testing the Platform
+
+To test with real OPN Chain testnet data:
+
+1. The platform is pre-configured for OPN Testnet
+2. Copy the WOPN address from the sidebar: `0xBc022C9dEb5AF250A526321d16Ef52E39b4DBD84`
+3. Paste it into the search bar and press Search
+4. You'll see:
+   - Real-time price calculated from DEX reserves
+   - Actual liquidity in the pool
+   - Recent swap transactions from the blockchain
+   - Live trading pair information
+
+You can also search for any other token address that has a trading pair with WOPN on OPN testnet.
+
 ## Configuration
 
 Update the following in `.env`:
 
-- `NEXT_PUBLIC_OPN_RPC_URL`: Your OPN Chain RPC endpoint
-- `NEXT_PUBLIC_DEX_FACTORY`: DEX factory contract address
-- `NEXT_PUBLIC_DEX_ROUTER`: DEX router contract address
-- `NEXT_PUBLIC_WOPN`: Wrapped OPN token address
+- `NEXT_PUBLIC_OPN_RPC_URL`: OPN Chain testnet RPC (default: https://testnet-rpc.iopn.tech)
+- `NEXT_PUBLIC_FACTORY_ADDRESS`: DEX factory contract address (default: 0x8860242B65611dfd077aEe26C3C7920813dF9208)
+- `NEXT_PUBLIC_ROUTER_ADDRESS`: DEX router contract address (default: 0xB489bce5c9c9364da2D1D1Bc5CE4274F63141885)
+- `NEXT_PUBLIC_WOPN_ADDRESS`: Wrapped OPN token address (default: 0xBc022C9dEb5AF250A526321d16Ef52E39b4DBD84)
 
 ## Project Structure
 
@@ -96,25 +111,30 @@ Shchard/
 └── public/                # Static assets
 ```
 
-## Features to Implement
+## Current Features (LIVE)
 
-The platform currently uses sample data. To connect to real OPN Chain data:
+The platform now includes fully functional blockchain integration:
 
-1. **Update RPC Configuration**: Add the actual OPN Chain RPC URL
-2. **Add DEX Contracts**: Configure the DEX factory and router addresses
-3. **Implement Data Fetching**:
-   - Fetch real token data from blockchain
-   - Query DEX pairs and reserves
-   - Listen to swap events for transactions
-   - Calculate price from reserves
-4. **Add Price History**: Store and fetch historical price data
-5. **Implement WebSocket Updates**: Real-time price and transaction updates
-6. **Add More Features**:
-   - Wallet connection
-   - Trading interface
-   - Portfolio tracking
-   - Price alerts
-   - Social features
+✅ **Real Token Data**: Fetches token info directly from OPN Chain
+✅ **Live Price Calculation**: Calculates prices from actual DEX reserve ratios
+✅ **Real Liquidity Data**: Shows actual liquidity locked in trading pairs
+✅ **Blockchain Transactions**: Displays real swap transactions from the chain
+✅ **Pair Detection**: Automatically finds trading pairs with WOPN
+✅ **Explorer Integration**: Links to OPN testnet explorer for transactions
+
+## Features to Add
+
+Future enhancements to make the platform even better:
+
+1. **Price History & Charts**: Store historical price data for accurate charts
+2. **WebSocket Updates**: Real-time price and transaction updates
+3. **Wallet Connection**: Connect MetaMask/WalletConnect for trading
+4. **Trading Interface**: Direct swap functionality
+5. **Multi-Pair Support**: Support for non-WOPN pairs
+6. **Token Search**: Search by name/symbol, not just address
+7. **Portfolio Tracking**: Track user holdings and P&L
+8. **Price Alerts**: Notifications for price movements
+9. **Advanced Analytics**: Volume charts, holder analytics, etc.
 
 ## Development
 

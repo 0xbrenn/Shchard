@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { OPN_CHAIN_CONFIG } from "./config";
+import { OPN_CHAIN_CONFIG, DEX_CONTRACTS } from "./config";
 
 // ERC20 ABI (minimal)
 export const ERC20_ABI = [
@@ -34,6 +34,23 @@ export function getProvider(): ethers.JsonRpcProvider {
     provider = new ethers.JsonRpcProvider(OPN_CHAIN_CONFIG.rpcUrl);
   }
   return provider;
+}
+
+export async function findTokenPair(tokenAddress: string): Promise<string | null> {
+  const provider = getProvider();
+  const factory = new ethers.Contract(DEX_CONTRACTS.factory, FACTORY_ABI, provider);
+
+  try {
+    // Try to find pair with WOPN
+    const pairAddress = await factory.getPair(tokenAddress, DEX_CONTRACTS.WOPN);
+    if (pairAddress && pairAddress !== ethers.ZeroAddress) {
+      return pairAddress;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error finding token pair:", error);
+    return null;
+  }
 }
 
 export async function getTokenInfo(tokenAddress: string) {

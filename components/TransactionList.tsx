@@ -1,62 +1,57 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { fetchTokenTransactions } from "@/lib/tokenService";
+import { Transaction } from "@/lib/types";
+import { OPN_CHAIN_CONFIG } from "@/lib/config";
 
 interface TransactionListProps {
   tokenAddress: string | null;
 }
 
-interface Transaction {
-  type: "buy" | "sell";
-  amount: string;
-  price: string;
-  total: string;
-  timestamp: Date;
-  txHash: string;
-}
-
 export default function TransactionList({ tokenAddress }: TransactionListProps) {
-  // Sample transaction data
-  const transactions: Transaction[] = [
-    {
-      type: "buy",
-      amount: "1,234.56",
-      price: "$1.234",
-      total: "$1,523.45",
-      timestamp: new Date(Date.now() - 120000),
-      txHash: "0x1234...5678",
-    },
-    {
-      type: "sell",
-      amount: "987.65",
-      price: "$1.230",
-      total: "$1,214.81",
-      timestamp: new Date(Date.now() - 300000),
-      txHash: "0xabcd...efgh",
-    },
-    {
-      type: "buy",
-      amount: "2,345.67",
-      price: "$1.228",
-      total: "$2,880.48",
-      timestamp: new Date(Date.now() - 480000),
-      txHash: "0x9876...5432",
-    },
-    {
-      type: "buy",
-      amount: "567.89",
-      price: "$1.225",
-      total: "$695.66",
-      timestamp: new Date(Date.now() - 720000),
-      txHash: "0xfedc...ba98",
-    },
-  ];
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!tokenAddress) {
+      setTransactions([]);
+      return;
+    }
+
+    const loadTransactions = async () => {
+      setLoading(true);
+      try {
+        const txs = await fetchTokenTransactions(tokenAddress, 20);
+        setTransactions(txs);
+      } catch (err) {
+        console.error("Failed to load transactions:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadTransactions();
+  }, [tokenAddress]);
 
   return (
     <div className="bg-[#131925] border border-[#1e2639] rounded-lg p-4">
       <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
 
-      {tokenAddress ? (
+      {!tokenAddress ? (
+        <div className="text-center text-gray-400 py-8">
+          Search for a token to view transactions
+        </div>
+      ) : loading ? (
+        <div className="text-center text-gray-400 py-8">
+          Loading transactions...
+        </div>
+      ) : transactions.length === 0 ? (
+        <div className="text-center text-gray-400 py-8">
+          No transactions found
+        </div>
+      ) : (
         <div className="space-y-2">
           <div className="grid grid-cols-5 gap-2 text-xs text-gray-400 pb-2 border-b border-[#1e2639]">
             <div>Type</div>
@@ -68,8 +63,11 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
           <div className="space-y-1 max-h-[300px] overflow-y-auto">
             {transactions.map((tx, index) => (
-              <div
+              <a
                 key={index}
+                href={`${OPN_CHAIN_CONFIG.explorerUrl}/tx/${tx.txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="grid grid-cols-5 gap-2 text-sm py-2 hover:bg-[#0a0e1a] rounded px-2 -mx-2 cursor-pointer"
               >
                 <div>
@@ -89,19 +87,20 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
                 <div className="text-right text-gray-400 text-xs">
                   {formatDistanceToNow(tx.timestamp, { addSuffix: true })}
                 </div>
-              </div>
+              </a>
             ))}
           </div>
 
           <div className="pt-2 border-t border-[#1e2639]">
-            <button className="w-full text-center text-sm text-blue-500 hover:text-blue-400">
-              View all transactions
-            </button>
+            <a
+              href={`${OPN_CHAIN_CONFIG.explorerUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center text-sm text-blue-500 hover:text-blue-400"
+            >
+              View all transactions on explorer
+            </a>
           </div>
-        </div>
-      ) : (
-        <div className="text-center text-gray-400 py-8">
-          Search for a token to view transactions
         </div>
       )}
     </div>
