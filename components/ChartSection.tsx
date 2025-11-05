@@ -181,12 +181,25 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       try {
         const response = await fetchBackendChartData(tokenAddress, timeframe);
 
-        if (response.candles.length === 0) {
+        if (!response || !response.candles || response.candles.length === 0) {
+          console.log("No candle data available");
           setLoading(false);
           return;
         }
 
-        const candles = response.candles;
+        const candles = response.candles.filter(c => c && c.time && typeof c.open === 'number');
+
+        if (candles.length === 0) {
+          console.log("No valid candle data after filtering");
+          setLoading(false);
+          return;
+        }
+
+        if (!chart || !chartRef.current) {
+          console.log("Chart not initialized");
+          setLoading(false);
+          return;
+        }
 
         // Calculate price change
         const firstPrice = candles[0].open;
