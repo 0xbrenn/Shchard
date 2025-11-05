@@ -130,41 +130,60 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   useEffect(() => {
     if (!chartContainerRef.current || !tokenAddress) return;
 
-    // Create chart with glassmorphism colors
+    // Create chart with TradingView-like professional styling
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#d1d4dc",
+        textColor: "#a3a3a3",
+        fontSize: 12,
       },
       grid: {
-        vertLines: { color: "rgba(236, 72, 153, 0.1)" },
-        horzLines: { color: "rgba(139, 92, 246, 0.1)" },
+        vertLines: { color: "rgba(255, 255, 255, 0.04)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.04)" },
       },
       width: chartContainerRef.current.clientWidth,
-      height: 600,
+      height: chartContainerRef.current.clientHeight,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        borderColor: "rgba(236, 72, 153, 0.2)",
+        borderColor: "rgba(255, 255, 255, 0.1)",
+        barSpacing: 8,
+        minBarSpacing: 4,
       },
       rightPriceScale: {
-        borderColor: "rgba(139, 92, 246, 0.2)",
+        borderColor: "rgba(255, 255, 255, 0.1)",
         autoScale: true,
-        mode: 0, // Normal mode
+        mode: 0,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
       crosshair: {
+        mode: 1, // Normal crosshair
         vertLine: {
-          color: "rgba(139, 92, 246, 0.5)",
+          color: "rgba(236, 72, 153, 0.6)",
           width: 1,
-          style: 1,
-          labelBackgroundColor: "#8b5cf6",
-        },
-        horzLine: {
-          color: "rgba(236, 72, 153, 0.5)",
-          width: 1,
-          style: 1,
+          style: 2,
           labelBackgroundColor: "#ec4899",
         },
+        horzLine: {
+          color: "rgba(139, 92, 246, 0.6)",
+          width: 1,
+          style: 2,
+          labelBackgroundColor: "#8b5cf6",
+        },
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
       },
       localization: {
         priceFormatter: (price: number) => {
@@ -233,11 +252,14 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
         if (chartType === "candlestick") {
           const candlestickSeries = chartRef.current.addCandlestickSeries({
-            upColor: "#10b981",
+            upColor: "#22c55e",
             downColor: "#ef4444",
             borderVisible: false,
-            wickUpColor: "#10b981",
+            wickUpColor: "#22c55e",
             wickDownColor: "#ef4444",
+            borderUpColor: "#22c55e",
+            borderDownColor: "#ef4444",
+            wickVisible: true,
             priceFormat: {
               type: "price",
               precision: decimals,
@@ -286,18 +308,35 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
     loadChartData();
 
+    // Improved resize handler with debouncing
+    let resizeTimeout: NodeJS.Timeout;
     const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-        });
-      }
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (chartContainerRef.current && chartRef.current) {
+          chartRef.current.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+          });
+        }
+      }, 100); // Debounce for 100ms
     };
 
     window.addEventListener("resize", handleResize);
 
+    // Also observe container size changes (ResizeObserver)
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+
+    if (chartContainerRef.current) {
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
     return () => {
+      clearTimeout(resizeTimeout);
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -408,7 +447,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       </div>
 
       {/* Chart */}
-      <div className="flex-1 p-4 relative glass">
+      <div className="flex-1 relative glass" style={{ minHeight: '500px' }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center glass-strong z-10">
             <div className="text-center">
@@ -426,7 +465,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             </div>
           </div>
         ) : (
-          <div ref={chartContainerRef} className="w-full h-full" />
+          <div ref={chartContainerRef} className="absolute inset-0" />
         )}
       </div>
     </div>
