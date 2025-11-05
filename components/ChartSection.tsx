@@ -212,25 +212,29 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         // Filter and validate candle data
         const candles = response.candles.filter(c => {
           if (!c || !c.time) return false;
+
           // For line chart, we only need close price
           if (chartType === 'line') {
-            return typeof c.close === 'number' || !isNaN(parseFloat(c.close));
+            return c.close != null && !isNaN(parseFloat(c.close));
           }
+
           // For candlestick, we need all OHLC values
-          return (typeof c.open === 'number' || !isNaN(parseFloat(c.open))) &&
-                 (typeof c.close === 'number' || !isNaN(parseFloat(c.close)));
+          return c.open != null && !isNaN(parseFloat(c.open)) &&
+                 c.high != null && !isNaN(parseFloat(c.high)) &&
+                 c.low != null && !isNaN(parseFloat(c.low)) &&
+                 c.close != null && !isNaN(parseFloat(c.close));
         }).map(c => ({
           ...c,
           time: typeof c.time === 'number' ? c.time : parseInt(c.time),
-          open: typeof c.open === 'number' ? c.open : parseFloat(c.open),
-          high: typeof c.high === 'number' ? c.high : parseFloat(c.high),
-          low: typeof c.low === 'number' ? c.low : parseFloat(c.low),
+          open: typeof c.open === 'number' ? c.open : parseFloat(c.open || 0),
+          high: typeof c.high === 'number' ? c.high : parseFloat(c.high || 0),
+          low: typeof c.low === 'number' ? c.low : parseFloat(c.low || 0),
           close: typeof c.close === 'number' ? c.close : parseFloat(c.close),
           volume: typeof c.volume === 'number' ? c.volume : parseFloat(c.volume || 0)
         }));
 
         if (candles.length === 0) {
-          console.log("No valid candle data after filtering");
+          console.log("No valid candle data after filtering - check if backend returned OHLC data");
           setLoading(false);
           return;
         }
@@ -379,12 +383,12 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
     let from: number;
     switch (range) {
-      case '1H': from = now - 3600; break;
-      case '4H': from = now - 4 * 3600; break;
-      case '1D': from = now - 24 * 3600; break;
-      case '3D': from = now - 3 * 24 * 3600; break;
-      case '1W': from = now - 7 * 24 * 3600; break;
-      case '1M': from = now - 30 * 24 * 3600; break;
+      case '1h': from = now - 3600; break;
+      case '4h': from = now - 4 * 3600; break;
+      case '1d': from = now - 24 * 3600; break;
+      case '3d': from = now - 3 * 24 * 3600; break;
+      case '1w': from = now - 7 * 24 * 3600; break;
+      case '30d': from = now - 30 * 24 * 3600; break;
       case 'ALL':
         timeScale.fitContent();
         return;
@@ -497,7 +501,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         {/* Time Range Zoom Controls */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-400 mr-2">Time Range:</span>
-          {['1H', '4H', '1D', '3D', '1W', '1M', 'ALL'].map((range) => (
+          {['1h', '4h', '1d', '3d', '1w', '30d', 'ALL'].map((range) => (
             <button
               key={range}
               onClick={() => handleTimeRange(range)}
