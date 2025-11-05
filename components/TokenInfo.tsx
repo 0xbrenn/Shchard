@@ -43,137 +43,81 @@ export default function TokenInfo({ tokenAddress }: TokenInfoProps) {
   };
 
   return (
-    <div className="bg-[#131925] p-4 border-b border-[#1e2639]">
-      <h3 className="text-lg font-semibold mb-4">Token Information</h3>
-
+    <div className="bg-[#131925] px-6 py-3">
       {!tokenAddress ? (
-        <div className="text-center text-gray-400 py-8">
-          <div className="text-4xl mb-2">🔍</div>
-          <div>Search for a token to view details</div>
+        <div className="text-center text-gray-400 py-4 text-sm">
+          Search for a token to view details
         </div>
       ) : loading ? (
-        <div className="text-center text-gray-400 py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-          <div>Loading token data...</div>
+        <div className="text-center text-gray-400 py-4 flex items-center justify-center gap-2">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+          <span className="text-sm">Loading...</span>
         </div>
       ) : error || !tokenData ? (
-        <div className="text-center text-red-500 py-8">
-          <div className="text-4xl mb-2">⚠️</div>
-          <div>{error || "No data available for this token"}</div>
+        <div className="text-center text-red-500 py-4 text-sm">
+          {error || "No data available"}
         </div>
       ) : (
-        <div className="space-y-4">
-          {/* Token Name and Symbol */}
-          <div>
-            <h4 className="text-2xl font-bold">{tokenData.token.name}</h4>
-            <span className="text-lg text-gray-400">{tokenData.token.symbol}</span>
-          </div>
-
-          {/* Price Info */}
-          <div className="p-3 bg-[#0a0e1a] rounded-lg">
-            <div className="text-sm text-gray-400 mb-1">Current Price</div>
-            <div className="text-3xl font-bold">
-              ${tokenData.price.price.toFixed(6)}
+        <div className="flex items-center justify-between gap-6">
+          {/* Token Name and Price */}
+          <div className="flex items-center gap-6">
+            <div>
+              <h4 className="text-xl font-bold">{tokenData.token.name}</h4>
+              <span className="text-sm text-gray-400">{tokenData.token.symbol}</span>
             </div>
-            {tokenData.price.priceChange24h !== 0 && (
-              <div
-                className={`text-base mt-1 ${
-                  tokenData.price.priceChange24h >= 0
-                    ? "text-green-500"
-                    : "text-red-500"
-                }`}
-              >
-                {tokenData.price.priceChange24h >= 0 ? "▲" : "▼"}
-                {" "}{Math.abs(tokenData.price.priceChange24h).toFixed(2)}%
+            <div className="flex items-baseline gap-3">
+              <div className="text-2xl font-bold">
+                ${tokenData.price.price.toFixed(8)}
               </div>
-            )}
+              {tokenData.price.priceChange24h !== 0 && (
+                <div
+                  className={`text-lg font-semibold ${
+                    tokenData.price.priceChange24h >= 0
+                      ? "text-green-500"
+                      : "text-red-500"
+                  }`}
+                >
+                  {tokenData.price.priceChange24h >= 0 ? "▲" : "▼"}
+                  {" "}{Math.abs(tokenData.price.priceChange24h).toFixed(2)}%
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 bg-[#0a0e1a] rounded-lg">
-              <div className="text-gray-400 text-xs mb-1">Liquidity</div>
-              <div className="font-bold text-lg">
+          {/* Stats */}
+          <div className="flex items-center gap-6">
+            <div>
+              <div className="text-xs text-gray-400">Liquidity</div>
+              <div className="font-semibold">
                 ${tokenData.price.liquidity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
             </div>
             {tokenData.price.volume24h > 0 && (
-              <div className="p-3 bg-[#0a0e1a] rounded-lg">
-                <div className="text-gray-400 text-xs mb-1">24h Volume</div>
-                <div className="font-bold text-lg">
+              <div>
+                <div className="text-xs text-gray-400">24h Volume</div>
+                <div className="font-semibold">
                   ${tokenData.price.volume24h.toLocaleString()}
                 </div>
               </div>
             )}
-            {tokenData.price.marketCap > 0 && (
-              <div className="p-3 bg-[#0a0e1a] rounded-lg">
-                <div className="text-gray-400 text-xs mb-1">Market Cap</div>
-                <div className="font-bold text-lg">
-                  ${tokenData.price.marketCap.toLocaleString()}
-                </div>
-              </div>
-            )}
-            {tokenData.price.holders > 0 && (
-              <div className="p-3 bg-[#0a0e1a] rounded-lg">
-                <div className="text-gray-400 text-xs mb-1">Holders</div>
-                <div className="font-bold text-lg">
-                  {tokenData.price.holders.toLocaleString()}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Addresses */}
-          <div className="space-y-2">
-            <div>
-              <div className="text-gray-400 text-xs mb-1">Token Contract</div>
-              <div className="flex items-center gap-2">
-                <div className="font-mono text-xs bg-[#0a0e1a] p-2 rounded flex-1 break-all">
-                  {tokenAddress}
-                </div>
-                <button
-                  onClick={() => handleCopyAddress(tokenAddress, "Token")}
-                  className="px-3 py-2 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs transition-colors"
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-gray-400 text-xs mb-1">Pair Contract</div>
-              <div className="flex items-center gap-2">
-                <div className="font-mono text-xs bg-[#0a0e1a] p-2 rounded flex-1 break-all">
-                  {tokenData.pair.pairAddress}
-                </div>
-                <button
-                  onClick={() => handleCopyAddress(tokenData.pair.pairAddress, "Pair")}
-                  className="px-3 py-2 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs transition-colors"
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2 pt-2">
+          {/* Actions */}
+          <div className="flex gap-2">
             <a
               href={`${OPN_CHAIN_CONFIG.explorerUrl}/address/${tokenAddress}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 bg-blue-500 hover:bg-blue-600 py-2.5 rounded text-sm font-medium text-center transition-colors"
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded text-sm font-medium transition-colors"
             >
-              View on Explorer
+              View Token
             </a>
-            <a
-              href={`${OPN_CHAIN_CONFIG.explorerUrl}/address/${tokenData.pair.pairAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 bg-[#0a0e1a] hover:bg-[#1e2639] py-2.5 rounded text-sm font-medium text-center transition-colors"
+            <button
+              onClick={() => handleCopyAddress(tokenAddress, "Token")}
+              className="px-4 py-2 bg-[#0a0e1a] hover:bg-[#1e2639] rounded text-sm font-medium transition-colors"
             >
-              View Pair
-            </a>
+              Copy Address
+            </button>
           </div>
         </div>
       )}

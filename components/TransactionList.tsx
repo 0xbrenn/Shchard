@@ -27,7 +27,7 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
     const loadTransactions = async () => {
       setLoading(true);
       try {
-        const txs = await fetchTokenTransactions(tokenAddress, 20);
+        const txs = await fetchTokenTransactions(tokenAddress, 50);
         setTransactions(txs);
       } catch (err) {
         console.error("Failed to load transactions:", err);
@@ -69,14 +69,14 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
           };
 
           // Add to top of list
-          setTransactions(prev => [newTx, ...prev.slice(0, 19)]);
+          setTransactions(prev => [newTx, ...prev.slice(0, 49)]);
 
           // Highlight new transaction
           setNewTxHighlight(swap.txHash);
           setTimeout(() => setNewTxHighlight(null), 3000);
         };
 
-        // Subscribe to swaps (reuse the same WebSocket connection)
+        // Subscribe to swaps
         await wsService.subscribeToSwaps(tokenAddress, pairAddress, isToken0, handleNewSwap);
 
       } catch (error) {
@@ -98,83 +98,103 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
   }, [tokenAddress]);
 
   return (
-    <div className="h-full flex flex-col bg-[#131925] p-4">
-      <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
+    <div className="h-full flex flex-col bg-[#131925]">
+      <div className="px-6 py-4 border-b border-[#1e2639] flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Transactions</h3>
+        {tokenAddress && transactions.length > 0 && (
+          <span className="text-sm text-gray-400">
+            {transactions.length} recent swaps
+          </span>
+        )}
+      </div>
 
       {!tokenAddress ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <div className="text-4xl mb-2">📋</div>
-            <div>Search for a token to view transactions</div>
+            <div className="text-5xl mb-3">📊</div>
+            <div className="text-lg">Select a token to view transactions</div>
           </div>
         </div>
       ) : loading ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
             <div>Loading transactions...</div>
           </div>
         </div>
       ) : transactions.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <div className="text-4xl mb-2">📭</div>
-            <div>No transactions found</div>
+            <div className="text-5xl mb-3">📭</div>
+            <div className="text-lg">No transactions yet</div>
+            <div className="text-sm mt-1">Make the first swap!</div>
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="grid grid-cols-3 gap-2 text-xs text-gray-400 pb-2 border-b border-[#1e2639]">
+        <div className="flex-1 overflow-hidden">
+          {/* Table Header */}
+          <div className="px-6 py-3 grid grid-cols-6 gap-4 text-xs text-gray-400 font-semibold border-b border-[#1e2639]">
             <div>Type</div>
-            <div className="text-right">Amount</div>
+            <div className="col-span-2 text-right">Token Amount</div>
+            <div className="text-right">Price (USD)</div>
+            <div className="text-right">Total Value</div>
             <div className="text-right">Time</div>
           </div>
 
-          <div className="flex-1 overflow-y-auto mt-2">
+          {/* Table Body */}
+          <div className="overflow-y-auto" style={{ maxHeight: "calc(100% - 48px)" }}>
             {transactions.map((tx, index) => (
               <a
-                key={index}
+                key={`${tx.txHash}-${index}`}
                 href={`${OPN_CHAIN_CONFIG.explorerUrl}/tx/${tx.txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`grid grid-cols-3 gap-2 text-sm py-3 hover:bg-[#0a0e1a] rounded px-2 -mx-2 cursor-pointer transition-all border-b border-[#1e2639]/50 ${
+                className={`px-6 py-4 grid grid-cols-6 gap-4 hover:bg-[#0a0e1a] transition-all border-b border-[#1e2639]/30 cursor-pointer ${
                   newTxHighlight === tx.txHash ? "bg-blue-500/20 animate-pulse" : ""
                 }`}
               >
-                <div>
+                {/* Type */}
+                <div className="flex items-center">
                   <span
-                    className={`px-2 py-1 rounded text-xs font-bold ${
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold ${
                       tx.type === "buy"
-                        ? "bg-green-500/20 text-green-500"
-                        : "bg-red-500/20 text-red-500"
+                        ? "bg-green-500/20 text-green-400"
+                        : "bg-red-500/20 text-red-400"
                     }`}
                   >
-                    {tx.type.toUpperCase()}
+                    {tx.type === "buy" ? "BUY" : "SELL"}
                   </span>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {tx.total}
-                  </div>
                 </div>
-                <div className="text-right">
+
+                {/* Token Amount */}
+                <div className="col-span-2 text-right flex flex-col justify-center">
                   <div className="font-medium">{tx.amount}</div>
-                  <div className="text-xs text-gray-500">{tx.price}</div>
+                  <div className="text-xs text-gray-500">tokens</div>
                 </div>
-                <div className="text-right text-gray-400 text-xs">
-                  {formatDistanceToNow(tx.timestamp, { addSuffix: true })}
+
+                {/* Price */}
+                <div className="text-right flex flex-col justify-center">
+                  <div className="font-medium">{tx.price}</div>
+                  <div className="text-xs text-gray-500">per token</div>
+                </div>
+
+                {/* Total Value */}
+                <div className="text-right flex flex-col justify-center">
+                  <div className="font-bold text-white">{tx.total}</div>
+                  <div className="text-xs text-gray-500">total</div>
+                </div>
+
+                {/* Time */}
+                <div className="text-right flex flex-col justify-center">
+                  <div className="text-sm">
+                    {formatDistanceToNow(tx.timestamp, { addSuffix: true })}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {tx.timestamp.toLocaleTimeString()}
+                  </div>
                 </div>
               </a>
             ))}
-          </div>
-
-          <div className="pt-3 mt-3 border-t border-[#1e2639]">
-            <a
-              href={`${OPN_CHAIN_CONFIG.explorerUrl}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full text-center text-sm text-blue-500 hover:text-blue-400 py-2 bg-blue-500/10 rounded transition-colors"
-            >
-              View on Explorer →
-            </a>
           </div>
         </div>
       )}

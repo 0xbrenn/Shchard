@@ -20,24 +20,21 @@ export default function Home() {
         {/* Sidebar */}
         <Sidebar selectedToken={selectedToken} onTokenSelect={setSelectedToken} />
 
-        {/* Main Chart and Data Area */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left: Chart Area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Main Area - Chart, Info, and Transactions */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Top: Token Info (compact) */}
+          <div className="flex-shrink-0 border-b border-[#1e2639]">
+            <TokenInfo tokenAddress={selectedToken} />
+          </div>
+
+          {/* Middle: Chart */}
+          <div className="flex-1 overflow-hidden">
             <ChartSection tokenAddress={selectedToken} />
           </div>
 
-          {/* Right: Token Info and Transactions */}
-          <div className="w-96 flex flex-col overflow-hidden bg-[#131925] border-l border-[#1e2639]">
-            {/* Token Info - Fixed height */}
-            <div className="flex-shrink-0 overflow-y-auto">
-              <TokenInfo tokenAddress={selectedToken} />
-            </div>
-
-            {/* Transactions - Takes remaining space */}
-            <div className="flex-1 overflow-hidden">
-              <TransactionList tokenAddress={selectedToken} />
-            </div>
+          {/* Bottom: Transactions - Like Uniswap */}
+          <div className="h-80 border-t border-[#1e2639] overflow-hidden">
+            <TransactionList tokenAddress={selectedToken} />
           </div>
         </div>
       </div>
