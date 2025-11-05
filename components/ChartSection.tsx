@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, CandlestickData, LineData, ISeriesApi, UTCTimestamp } from "lightweight-charts";
 import { fetchChartData as fetchBackendChartData, BackendWebSocket, SwapUpdate } from "@/lib/backendService";
 
-type Timeframe = "1M" | "5M" | "15M" | "1H" | "4H" | "1D" | "1W";
+type Timeframe = "1M" | "5M" | "15M" | "30M" | "1H" | "2H" | "4H" | "12H" | "1D";
 
 interface ChartSectionProps {
   tokenAddress: string | null;
@@ -97,10 +97,12 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       "1M": 60,
       "5M": 5 * 60,
       "15M": 15 * 60,
+      "30M": 30 * 60,
       "1H": 60 * 60,
+      "2H": 2 * 60 * 60,
       "4H": 4 * 60 * 60,
+      "12H": 12 * 60 * 60,
       "1D": 24 * 60 * 60,
-      "1W": 7 * 24 * 60 * 60,
     };
     return map[tf];
   };
@@ -366,7 +368,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     };
   }, [chartType, timeframe, tokenAddress]);
 
-  const timeframes: Timeframe[] = ["1M", "5M", "15M", "1H", "4H", "1D", "1W"];
+  const timeframes: Timeframe[] = ["1M", "5M", "15M", "30M", "1H", "2H", "4H", "12H", "1D"];
 
   // Time range zoom options (like TradingView)
   const handleTimeRange = (range: string) => {
