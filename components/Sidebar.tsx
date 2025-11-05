@@ -36,26 +36,26 @@ export default function Sidebar({ selectedToken, onTokenSelect }: SidebarProps) 
   };
 
   return (
-    <aside className="w-72 bg-[#131925] border-r border-[#1e2639] overflow-y-auto flex flex-col">
+    <aside className="w-72 glass-strong border-r border-[rgba(236,72,153,0.3)] overflow-y-auto flex flex-col">
       <div className="p-4 flex-1">
-        <h2 className="text-lg font-semibold mb-4">Available Tokens</h2>
+        <h2 className="text-lg font-semibold mb-4 gradient-text">Available Tokens</h2>
 
         <div className="space-y-2">
           {sampleTokens.map((token, index) => (
             <div
               key={index}
               onClick={() => handleTokenClick(token.address)}
-              className={`bg-[#0a0e1a] border rounded-lg p-3 transition-all cursor-pointer ${
+              className={`glass border rounded-lg p-3 transition-all cursor-pointer card-hover ${
                 selectedToken?.toLowerCase() === token.address.toLowerCase()
-                  ? "border-blue-500 ring-2 ring-blue-500/50"
-                  : "border-[#1e2639] hover:border-blue-500"
+                  ? "border-[#8b5cf6] ring-2 ring-[rgba(139,92,246,0.5)] glow-purple"
+                  : "border-[rgba(236,72,153,0.3)] hover:border-[#ec4899]"
               }`}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-lg">{token.symbol}</span>
+                <span className="font-bold text-lg gradient-text">{token.symbol}</span>
                 <button
                   onClick={(e) => handleCopyAddress(token.address, e)}
-                  className="text-xs px-2 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded transition-colors"
+                  className="text-xs px-2 py-1 glass border border-[rgba(139,92,246,0.3)] text-purple-400 hover:border-[#8b5cf6] rounded transition-all"
                 >
                   Copy
                 </button>
@@ -70,15 +70,15 @@ export default function Sidebar({ selectedToken, onTokenSelect }: SidebarProps) 
                 </span>
               </div>
               {selectedToken?.toLowerCase() === token.address.toLowerCase() && (
-                <div className="mt-2 pt-2 border-t border-[#1e2639]">
-                  <span className="text-xs text-blue-400">✓ Currently Viewing</span>
+                <div className="mt-2 pt-2 border-t border-[rgba(139,92,246,0.3)]">
+                  <span className="text-xs text-purple-400">✓ Currently Viewing</span>
                 </div>
               )}
             </div>
           ))}
         </div>
 
-        <div className="mt-6 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+        <div className="mt-6 p-3 glass border border-[rgba(59,130,246,0.4)] rounded-lg glow-blue">
           <p className="text-sm font-semibold text-blue-400 mb-2">
             Quick Start Guide
           </p>
@@ -95,16 +95,16 @@ export default function Sidebar({ selectedToken, onTokenSelect }: SidebarProps) 
             Quick Links
           </h3>
           <div className="space-y-2">
-            <button className="w-full text-left px-3 py-2 rounded hover:bg-[#0a0e1a] text-sm">
+            <button className="w-full text-left px-3 py-2 rounded glass hover:border-[rgba(236,72,153,0.3)] border border-transparent text-sm transition-all">
               Hot Pairs
             </button>
-            <button className="w-full text-left px-3 py-2 rounded hover:bg-[#0a0e1a] text-sm">
+            <button className="w-full text-left px-3 py-2 rounded glass hover:border-[rgba(139,92,246,0.3)] border border-transparent text-sm transition-all">
               New Pairs
             </button>
-            <button className="w-full text-left px-3 py-2 rounded hover:bg-[#0a0e1a] text-sm">
+            <button className="w-full text-left px-3 py-2 rounded glass hover:border-[rgba(59,130,246,0.3)] border border-transparent text-sm transition-all">
               Gainers
             </button>
-            <button className="w-full text-left px-3 py-2 rounded hover:bg-[#0a0e1a] text-sm">
+            <button className="w-full text-left px-3 py-2 rounded glass hover:border-[rgba(236,72,153,0.3)] border border-transparent text-sm transition-all">
               Losers
             </button>
           </div>

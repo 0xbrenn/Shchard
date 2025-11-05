@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { fetchTokenData } from "@/lib/tokenService";
-import { TokenInfo as TokenInfoType } from "@/lib/types";
+import { fetchTokenInfo } from "@/lib/backendService";
 import { OPN_CHAIN_CONFIG } from "@/lib/config";
 
 interface TokenInfoProps {
@@ -10,7 +9,7 @@ interface TokenInfoProps {
 }
 
 export default function TokenInfo({ tokenAddress }: TokenInfoProps) {
-  const [tokenData, setTokenData] = useState<TokenInfoType | null>(null);
+  const [tokenData, setTokenData] = useState<{ price: number; volume24h: number; lastUpdate: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +23,7 @@ export default function TokenInfo({ tokenAddress }: TokenInfoProps) {
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchTokenData(tokenAddress);
+        const data = await fetchTokenInfo(tokenAddress);
         setTokenData(data);
       } catch (err) {
         setError("Failed to load token data");
@@ -35,71 +34,87 @@ export default function TokenInfo({ tokenAddress }: TokenInfoProps) {
     };
 
     loadTokenData();
+
+    // Refresh every 30 seconds
+    const interval = setInterval(loadTokenData, 30000);
+    return () => clearInterval(interval);
   }, [tokenAddress]);
 
-  const handleCopyAddress = (address: string, type: string) => {
+  const handleCopyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
-    alert(`${type} address copied to clipboard!`);
+    // Simple visual feedback without alert
+    const btn = document.activeElement as HTMLButtonElement;
+    if (btn) {
+      const originalText = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 1000);
+    }
+  };
+
+  // Helper to format price with proper decimals
+  const formatPrice = (price: number): string => {
+    if (price === 0) return "$0.00";
+    if (price < 0.000001) return `$${price.toFixed(10)}`;
+    if (price < 0.00001) return `$${price.toFixed(9)}`;
+    if (price < 0.0001) return `$${price.toFixed(8)}`;
+    if (price < 0.001) return `$${price.toFixed(7)}`;
+    if (price < 0.01) return `$${price.toFixed(6)}`;
+    if (price < 0.1) return `$${price.toFixed(5)}`;
+    if (price < 1) return `$${price.toFixed(4)}`;
+    if (price < 10) return `$${price.toFixed(3)}`;
+    return `$${price.toFixed(2)}`;
   };
 
   return (
-    <div className="bg-[#131925] px-6 py-3">
+    <div className="glass-strong px-6 py-3 border-b border-[rgba(139,92,246,0.2)]">
       {!tokenAddress ? (
         <div className="text-center text-gray-400 py-4 text-sm">
           Search for a token to view details
         </div>
       ) : loading ? (
         <div className="text-center text-gray-400 py-4 flex items-center justify-center gap-2">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
           <span className="text-sm">Loading...</span>
         </div>
       ) : error || !tokenData ? (
-        <div className="text-center text-red-500 py-4 text-sm">
+        <div className="text-center text-red-400 py-4 text-sm">
           {error || "No data available"}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-6">
-          {/* Token Name and Price */}
-          <div className="flex items-center gap-6">
+          {/* Token Address (Shortened) */}
+          <div className="flex items-center gap-4">
             <div>
-              <h4 className="text-xl font-bold">{tokenData.token.name}</h4>
-              <span className="text-sm text-gray-400">{tokenData.token.symbol}</span>
+              <div className="text-xs text-gray-400">Token</div>
+              <div className="font-mono text-sm text-gray-300">
+                {tokenAddress.slice(0, 6)}...{tokenAddress.slice(-4)}
+              </div>
             </div>
             <div className="flex items-baseline gap-3">
-              <div className="text-2xl font-bold">
-                ${tokenData.price.price.toFixed(8)}
+              <div className="text-2xl font-bold gradient-text">
+                {formatPrice(tokenData.price)}
               </div>
-              {tokenData.price.priceChange24h !== 0 && (
-                <div
-                  className={`text-lg font-semibold ${
-                    tokenData.price.priceChange24h >= 0
-                      ? "text-green-500"
-                      : "text-red-500"
-                  }`}
-                >
-                  {tokenData.price.priceChange24h >= 0 ? "▲" : "▼"}
-                  {" "}{Math.abs(tokenData.price.priceChange24h).toFixed(2)}%
-                </div>
-              )}
             </div>
           </div>
 
           {/* Stats */}
           <div className="flex items-center gap-6">
-            <div>
-              <div className="text-xs text-gray-400">Liquidity</div>
-              <div className="font-semibold">
-                ${tokenData.price.liquidity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </div>
-            </div>
-            {tokenData.price.volume24h > 0 && (
+            {tokenData.volume24h > 0 && (
               <div>
                 <div className="text-xs text-gray-400">24h Volume</div>
-                <div className="font-semibold">
-                  ${tokenData.price.volume24h.toLocaleString()}
+                <div className="font-semibold text-purple-400">
+                  ${tokenData.volume24h.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                 </div>
               </div>
             )}
+            <div>
+              <div className="text-xs text-gray-400">Last Update</div>
+              <div className="font-semibold text-blue-400">
+                {new Date(tokenData.lastUpdate * 1000).toLocaleTimeString()}
+              </div>
+            </div>
           </div>
 
           {/* Actions */}
@@ -108,13 +123,13 @@ export default function TokenInfo({ tokenAddress }: TokenInfoProps) {
               href={`${OPN_CHAIN_CONFIG.explorerUrl}/address/${tokenAddress}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded text-sm font-medium transition-colors"
+              className="px-4 py-2 btn-gradient rounded text-sm font-medium transition-all glow-purple"
             >
               View Token
             </a>
             <button
-              onClick={() => handleCopyAddress(tokenAddress, "Token")}
-              className="px-4 py-2 bg-[#0a0e1a] hover:bg-[#1e2639] rounded text-sm font-medium transition-colors"
+              onClick={() => handleCopyAddress(tokenAddress)}
+              className="px-4 py-2 glass border border-[rgba(236,72,153,0.3)] hover:border-[#ec4899] rounded text-sm font-medium transition-all"
             >
               Copy Address
             </button>

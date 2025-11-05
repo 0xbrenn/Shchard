@@ -23,7 +23,7 @@ export default function Home() {
         {/* Main Area - Chart, Info, and Transactions */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Top: Token Info (compact) */}
-          <div className="flex-shrink-0 border-b border-[#1e2639]">
+          <div className="flex-shrink-0">
             <TokenInfo tokenAddress={selectedToken} />
           </div>
 
@@ -33,7 +33,7 @@ export default function Home() {
           </div>
 
           {/* Bottom: Transactions - Like Uniswap */}
-          <div className="h-80 border-t border-[#1e2639] overflow-hidden">
+          <div className="h-80 border-t border-[rgba(236,72,153,0.3)] overflow-hidden">
             <TransactionList tokenAddress={selectedToken} />
           </div>
         </div>

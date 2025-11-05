@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, CandlestickData, LineData, ISeriesApi, UTCTimestamp } from "lightweight-charts";
-import { fetchChartData, Timeframe, calculatePriceChange } from "@/lib/chartService";
-import { getWebSocketService, SwapEvent } from "@/lib/websocketService";
-import { findTokenPair, getPairReserves } from "@/lib/web3";
+import { fetchChartData as fetchBackendChartData, BackendWebSocket, SwapUpdate } from "@/lib/backendService";
+
+type Timeframe = "5M" | "15M" | "1H" | "4H" | "1D" | "1W";
 
 interface ChartSectionProps {
   tokenAddress: string | null;
@@ -19,9 +19,10 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   const [loading, setLoading] = useState(false);
   const [priceChange, setPriceChange] = useState({ change: 0, changePercent: 0 });
   const [currentPrice, setCurrentPrice] = useState(0);
-  const [liveSwapIndicator, setLiveSwapIndicator] = useState<SwapEvent | null>(null);
+  const [liveSwapIndicator, setLiveSwapIndicator] = useState<SwapUpdate["data"] | null>(null);
   const [isLive, setIsLive] = useState(false);
   const currentDataRef = useRef<CandlestickData[]>([]);
+  const wsRef = useRef<BackendWebSocket | null>(null);
 
   // Helper function to determine decimal places for price
   const getPriceDecimals = (price: number): number => {
@@ -43,8 +44,9 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     return price.toFixed(decimals);
   };
 
-  // Handle live swap updates
-  const handleLiveSwap = (swap: SwapEvent) => {
+  // Handle live swap updates from backend
+  const handleLiveSwap = (swapData: SwapUpdate) => {
+    const swap = swapData.data;
     console.log("💹 Live swap received:", swap);
 
     setCurrentPrice(swap.price);
@@ -56,7 +58,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     }, 3000);
 
     // Update chart with new price
-    if (seriesRef.current && currentDataRef.current.length > 0) {
+    if (seriesRef.current && currentDataRef.current.length > 0 && chartType === "candlestick") {
       const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
       const currentTime = Math.floor(swap.timestamp) as UTCTimestamp;
 
@@ -106,36 +108,19 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   useEffect(() => {
     if (!tokenAddress) return;
 
-    const setupWebSocket = async () => {
-      try {
-        const pairAddress = await findTokenPair(tokenAddress);
-        if (!pairAddress) return;
+    // Initialize WebSocket connection to backend
+    if (!wsRef.current) {
+      wsRef.current = new BackendWebSocket();
+    }
 
-        const reserves = await getPairReserves(pairAddress);
-        const isToken0 = reserves.token0.toLowerCase() === tokenAddress.toLowerCase();
-
-        const wsService = getWebSocketService();
-        await wsService.connect();
-
-        console.log("🔌 Subscribing to live swaps...");
-        await wsService.subscribeToSwaps(tokenAddress, pairAddress, isToken0, handleLiveSwap);
-        setIsLive(true);
-
-      } catch (error) {
-        console.error("Failed to setup WebSocket:", error);
-        setIsLive(false);
-      }
-    };
-
-    setupWebSocket();
+    // Subscribe to token updates
+    console.log("🔌 Subscribing to live swaps via backend...");
+    wsRef.current.subscribe(tokenAddress, handleLiveSwap);
+    setIsLive(true);
 
     return () => {
-      if (tokenAddress) {
-        findTokenPair(tokenAddress).then(pairAddress => {
-          if (pairAddress) {
-            getWebSocketService().unsubscribe(tokenAddress, pairAddress);
-          }
-        });
+      if (wsRef.current && tokenAddress) {
+        wsRef.current.unsubscribe(tokenAddress);
       }
       setIsLive(false);
     };
@@ -145,40 +130,40 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   useEffect(() => {
     if (!chartContainerRef.current || !tokenAddress) return;
 
-    // Create chart with dynamic precision
+    // Create chart with glassmorphism colors
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#0a0e1a" },
+        background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#d1d4dc",
       },
       grid: {
-        vertLines: { color: "#1e2639" },
-        horzLines: { color: "#1e2639" },
+        vertLines: { color: "rgba(236, 72, 153, 0.1)" },
+        horzLines: { color: "rgba(139, 92, 246, 0.1)" },
       },
       width: chartContainerRef.current.clientWidth,
       height: 600,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        borderColor: "#1e2639",
+        borderColor: "rgba(236, 72, 153, 0.2)",
       },
       rightPriceScale: {
-        borderColor: "#1e2639",
+        borderColor: "rgba(139, 92, 246, 0.2)",
         autoScale: true,
         mode: 0, // Normal mode
       },
       crosshair: {
         vertLine: {
-          color: "#758696",
+          color: "rgba(139, 92, 246, 0.5)",
           width: 1,
           style: 1,
-          labelBackgroundColor: "#3b82f6",
+          labelBackgroundColor: "#8b5cf6",
         },
         horzLine: {
-          color: "#758696",
+          color: "rgba(236, 72, 153, 0.5)",
           width: 1,
           style: 1,
-          labelBackgroundColor: "#3b82f6",
+          labelBackgroundColor: "#ec4899",
         },
       },
       localization: {
@@ -190,27 +175,30 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
     chartRef.current = chart;
 
-    // Load chart data
+    // Load chart data from backend
     const loadChartData = async () => {
       setLoading(true);
       try {
-        const data = await fetchChartData(tokenAddress, timeframe);
+        const response = await fetchBackendChartData(tokenAddress, timeframe);
 
-        if (data.length === 0) {
+        if (response.candles.length === 0) {
           setLoading(false);
           return;
         }
 
-        // Calculate price change
-        const change = calculatePriceChange(data);
-        setPriceChange(change);
+        const candles = response.candles;
 
-        const lastCandle = data[data.length - 1];
-        const price = lastCandle.close || lastCandle.value || 0;
-        setCurrentPrice(price);
+        // Calculate price change
+        const firstPrice = candles[0].open;
+        const lastPrice = candles[candles.length - 1].close;
+        const change = lastPrice - firstPrice;
+        const changePercent = (change / firstPrice) * 100;
+        setPriceChange({ change, changePercent });
+
+        setCurrentPrice(lastPrice);
 
         // Set price scale precision based on price
-        const decimals = getPriceDecimals(price);
+        const decimals = getPriceDecimals(lastPrice);
         chart.priceScale("right").applyOptions({
           autoScale: true,
           scaleMargins: {
@@ -233,22 +221,20 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             },
           });
 
-          const candleData: CandlestickData[] = data
-            .filter(d => d.open !== undefined)
-            .map(d => ({
-              time: d.time as UTCTimestamp,
-              open: d.open!,
-              high: d.high!,
-              low: d.low!,
-              close: d.close!,
-            }));
+          const candleData: CandlestickData[] = candles.map(d => ({
+            time: d.time as UTCTimestamp,
+            open: d.open,
+            high: d.high,
+            low: d.low,
+            close: d.close,
+          }));
 
           candlestickSeries.setData(candleData);
           seriesRef.current = candlestickSeries;
           currentDataRef.current = candleData;
         } else {
           const lineSeries = chart.addLineSeries({
-            color: "#3b82f6",
+            color: "#8b5cf6",
             lineWidth: 2,
             priceFormat: {
               type: "price",
@@ -257,9 +243,9 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             },
           });
 
-          const lineData: LineData[] = data.map(d => ({
+          const lineData: LineData[] = candles.map(d => ({
             time: d.time as UTCTimestamp,
-            value: d.close || d.value || 0,
+            value: d.close,
           }));
 
           lineSeries.setData(lineData);
@@ -299,17 +285,17 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   const timeframes: Timeframe[] = ["5M", "15M", "1H", "4H", "1D", "1W"];
 
   return (
-    <div className="flex-1 flex flex-col bg-[#131925] border-b border-[#1e2639]">
+    <div className="flex-1 flex flex-col glass-strong border-b border-[rgba(236,72,153,0.2)]">
       {/* Price Header */}
       {tokenAddress && (
-        <div className="px-4 py-3 border-b border-[#1e2639]">
+        <div className="px-4 py-3 border-b border-[rgba(139,92,246,0.2)]">
           <div className="flex items-baseline gap-4">
-            <div className="text-3xl font-bold">
+            <div className="text-3xl font-bold gradient-text">
               ${formatPrice(currentPrice)}
             </div>
             {priceChange.changePercent !== 0 && (
               <div className={`flex items-center gap-1 text-lg ${
-                priceChange.changePercent >= 0 ? "text-green-500" : "text-red-500"
+                priceChange.changePercent >= 0 ? "text-green-400" : "text-red-400"
               }`}>
                 <span>{priceChange.changePercent >= 0 ? "▲" : "▼"}</span>
                 <span>{Math.abs(priceChange.changePercent).toFixed(2)}%</span>
@@ -321,10 +307,10 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             <div className="text-sm text-gray-400 ml-auto flex items-center gap-3">
               <span>{timeframe} Chart</span>
               {isLive && (
-                <span className="flex items-center gap-1.5 text-green-500 font-medium">
+                <span className="flex items-center gap-1.5 text-green-400 font-medium">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400"></span>
                   </span>
                   LIVE
                 </span>
@@ -338,22 +324,22 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       {liveSwapIndicator && (
         <div className={`px-4 py-2 border-b transition-all ${
           liveSwapIndicator.type === "buy"
-            ? "bg-green-500/20 border-green-500/50"
-            : "bg-red-500/20 border-red-500/50"
+            ? "bg-green-500/20 border-green-500/50 glow-green"
+            : "bg-red-500/20 border-red-500/50 glow-red"
         }`}>
           <div className="flex items-center justify-between text-sm">
             <span className="font-bold">
               🔥 {liveSwapIndicator.type === "buy" ? "BUY" : "SELL"} ${formatPrice(liveSwapIndicator.price)}
             </span>
             <span className="text-gray-300">
-              Amount: {liveSwapIndicator.amount}
+              Vol: ${liveSwapIndicator.volume.toFixed(2)}
             </span>
           </div>
         </div>
       )}
 
       {/* Chart Controls */}
-      <div className="px-4 py-3 border-b border-[#1e2639] flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-[rgba(236,72,153,0.2)] flex items-center justify-between">
         <div className="flex gap-2">
           {timeframes.map((tf) => (
             <button
@@ -362,8 +348,8 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
               disabled={!tokenAddress}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
                 timeframe === tf
-                  ? "bg-blue-500 text-white"
-                  : "bg-[#0a0e1a] text-gray-400 hover:text-white hover:bg-[#1e2639]"
+                  ? "btn-gradient text-white glow-purple"
+                  : "glass text-gray-400 hover:text-white"
               } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {tf}
@@ -377,8 +363,8 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             disabled={!tokenAddress}
             className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
               chartType === "candlestick"
-                ? "bg-blue-500 text-white"
-                : "bg-[#0a0e1a] text-gray-400 hover:text-white hover:bg-[#1e2639]"
+                ? "btn-gradient text-white glow-pink"
+                : "glass text-gray-400 hover:text-white"
             } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             📊 Candlestick
@@ -388,8 +374,8 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             disabled={!tokenAddress}
             className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
               chartType === "line"
-                ? "bg-blue-500 text-white"
-                : "bg-[#0a0e1a] text-gray-400 hover:text-white hover:bg-[#1e2639]"
+                ? "btn-gradient text-white glow-blue"
+                : "glass text-gray-400 hover:text-white"
             } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             📈 Line
@@ -398,11 +384,11 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       </div>
 
       {/* Chart */}
-      <div className="flex-1 p-4 relative">
+      <div className="flex-1 p-4 relative glass">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0a0e1a]/80 z-10">
+          <div className="absolute inset-0 flex items-center justify-center glass-strong z-10">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-2"></div>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-2"></div>
               <div className="text-gray-400">Loading chart data...</div>
             </div>
           </div>
@@ -411,7 +397,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-gray-400">
               <div className="text-5xl mb-4">📊</div>
-              <div className="text-xl mb-2">Search for a token to view its chart</div>
+              <div className="text-xl mb-2 gradient-text">Search for a token to view its chart</div>
               <div className="text-sm">Enter a token address in the search bar above</div>
             </div>
           </div>

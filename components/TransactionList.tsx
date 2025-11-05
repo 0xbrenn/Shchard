@@ -1,23 +1,35 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { fetchTokenTransactions } from "@/lib/tokenService";
-import { Transaction } from "@/lib/types";
+import { fetchChartData, BackendWebSocket, BackendTransaction, SwapUpdate } from "@/lib/backendService";
 import { OPN_CHAIN_CONFIG } from "@/lib/config";
-import { getWebSocketService, SwapEvent } from "@/lib/websocketService";
-import { findTokenPair, getPairReserves } from "@/lib/web3";
 
 interface TransactionListProps {
   tokenAddress: string | null;
 }
 
 export default function TransactionList({ tokenAddress }: TransactionListProps) {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<BackendTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [newTxHighlight, setNewTxHighlight] = useState<string | null>(null);
+  const wsRef = useRef<BackendWebSocket | null>(null);
 
-  // Load historical transactions
+  // Helper to format price with proper decimals
+  const formatPrice = (price: number): string => {
+    if (price === 0) return "$0.00";
+    if (price < 0.000001) return `$${price.toFixed(10)}`;
+    if (price < 0.00001) return `$${price.toFixed(9)}`;
+    if (price < 0.0001) return `$${price.toFixed(8)}`;
+    if (price < 0.001) return `$${price.toFixed(7)}`;
+    if (price < 0.01) return `$${price.toFixed(6)}`;
+    if (price < 0.1) return `$${price.toFixed(5)}`;
+    if (price < 1) return `$${price.toFixed(4)}`;
+    if (price < 10) return `$${price.toFixed(3)}`;
+    return `$${price.toFixed(2)}`;
+  };
+
+  // Load historical transactions from backend
   useEffect(() => {
     if (!tokenAddress) {
       setTransactions([]);
@@ -27,8 +39,9 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
     const loadTransactions = async () => {
       setLoading(true);
       try {
-        const txs = await fetchTokenTransactions(tokenAddress, 50);
-        setTransactions(txs);
+        const response = await fetchChartData(tokenAddress, "1H");
+        // Backend returns transactions newest first, so no need to reverse
+        setTransactions(response.transactions || []);
       } catch (err) {
         console.error("Failed to load transactions:", err);
       } finally {
@@ -39,68 +52,42 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
     loadTransactions();
   }, [tokenAddress]);
 
-  // Subscribe to real-time transactions
+  // Subscribe to real-time transactions via backend WebSocket
   useEffect(() => {
     if (!tokenAddress) return;
 
-    const setupLiveTransactions = async () => {
-      try {
-        const pairAddress = await findTokenPair(tokenAddress);
-        if (!pairAddress) return;
+    // Initialize WebSocket connection to backend
+    if (!wsRef.current) {
+      wsRef.current = new BackendWebSocket();
+    }
 
-        const reserves = await getPairReserves(pairAddress);
-        const isToken0 = reserves.token0.toLowerCase() === tokenAddress.toLowerCase();
+    const handleNewSwap = (swapUpdate: SwapUpdate) => {
+      console.log("📋 New transaction received:", swapUpdate);
 
-        const wsService = getWebSocketService();
+      const swap = swapUpdate.data;
 
-        const handleNewSwap = (swap: SwapEvent) => {
-          console.log("📋 New transaction received:", swap);
+      // Add to top of list (newest first)
+      setTransactions(prev => [swap, ...prev.slice(0, 49)]);
 
-          // Create new transaction from swap
-          const newTx: Transaction = {
-            type: swap.type,
-            amount: swap.amount,
-            price: `$${swap.price.toFixed(8)}`,
-            total: `$${(parseFloat(swap.amount) * swap.price).toFixed(2)}`,
-            timestamp: new Date(swap.timestamp * 1000),
-            txHash: swap.txHash,
-            from: "",
-            to: "",
-          };
-
-          // Add to top of list
-          setTransactions(prev => [newTx, ...prev.slice(0, 49)]);
-
-          // Highlight new transaction
-          setNewTxHighlight(swap.txHash);
-          setTimeout(() => setNewTxHighlight(null), 3000);
-        };
-
-        // Subscribe to swaps
-        await wsService.subscribeToSwaps(tokenAddress, pairAddress, isToken0, handleNewSwap);
-
-      } catch (error) {
-        console.error("Failed to setup live transactions:", error);
-      }
+      // Highlight new transaction
+      setNewTxHighlight(swap.txHash);
+      setTimeout(() => setNewTxHighlight(null), 3000);
     };
 
-    setupLiveTransactions();
+    // Subscribe to token updates
+    wsRef.current.subscribe(tokenAddress, handleNewSwap);
 
     return () => {
-      if (tokenAddress) {
-        findTokenPair(tokenAddress).then(pairAddress => {
-          if (pairAddress) {
-            getWebSocketService().unsubscribe(tokenAddress, pairAddress);
-          }
-        });
+      if (wsRef.current && tokenAddress) {
+        wsRef.current.unsubscribe(tokenAddress);
       }
     };
   }, [tokenAddress]);
 
   return (
-    <div className="h-full flex flex-col bg-[#131925]">
-      <div className="px-6 py-4 border-b border-[#1e2639] flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Transactions</h3>
+    <div className="h-full flex flex-col glass-strong">
+      <div className="px-6 py-4 border-b border-[rgba(236,72,153,0.3)] flex items-center justify-between">
+        <h3 className="text-lg font-semibold gradient-text">Transactions</h3>
         {tokenAddress && transactions.length > 0 && (
           <span className="text-sm text-gray-400">
             {transactions.length} recent swaps
@@ -112,13 +99,13 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
             <div className="text-5xl mb-3">📊</div>
-            <div className="text-lg">Select a token to view transactions</div>
+            <div className="text-lg gradient-text">Select a token to view transactions</div>
           </div>
         </div>
       ) : loading ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mx-auto mb-3"></div>
             <div>Loading transactions...</div>
           </div>
         </div>
@@ -126,14 +113,14 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
             <div className="text-5xl mb-3">📭</div>
-            <div className="text-lg">No transactions yet</div>
+            <div className="text-lg gradient-text">No transactions yet</div>
             <div className="text-sm mt-1">Make the first swap!</div>
           </div>
         </div>
       ) : (
         <div className="flex-1 overflow-hidden">
           {/* Table Header */}
-          <div className="px-6 py-3 grid grid-cols-6 gap-4 text-xs text-gray-400 font-semibold border-b border-[#1e2639]">
+          <div className="px-6 py-3 grid grid-cols-6 gap-4 text-xs text-gray-400 font-semibold border-b border-[rgba(139,92,246,0.3)]">
             <div>Type</div>
             <div className="col-span-2 text-right">Token Amount</div>
             <div className="text-right">Price (USD)</div>
@@ -149,8 +136,8 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
                 href={`${OPN_CHAIN_CONFIG.explorerUrl}/tx/${tx.txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`px-6 py-4 grid grid-cols-6 gap-4 hover:bg-[#0a0e1a] transition-all border-b border-[#1e2639]/30 cursor-pointer ${
-                  newTxHighlight === tx.txHash ? "bg-blue-500/20 animate-pulse" : ""
+                className={`px-6 py-4 grid grid-cols-6 gap-4 glass hover:border-[rgba(139,92,246,0.5)] border border-transparent transition-all cursor-pointer ${
+                  newTxHighlight === tx.txHash ? "glow-purple animate-pulse" : ""
                 }`}
               >
                 {/* Type */}
@@ -158,8 +145,8 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
                   <span
                     className={`px-3 py-1.5 rounded-md text-xs font-bold ${
                       tx.type === "buy"
-                        ? "bg-green-500/20 text-green-400"
-                        : "bg-red-500/20 text-red-400"
+                        ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                        : "bg-red-500/20 text-red-400 border border-red-500/40"
                     }`}
                   >
                     {tx.type === "buy" ? "BUY" : "SELL"}
@@ -168,29 +155,29 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                 {/* Token Amount */}
                 <div className="col-span-2 text-right flex flex-col justify-center">
-                  <div className="font-medium">{tx.amount}</div>
+                  <div className="font-medium">{tx.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</div>
                   <div className="text-xs text-gray-500">tokens</div>
                 </div>
 
                 {/* Price */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="font-medium">{tx.price}</div>
+                  <div className="font-medium text-purple-400">{formatPrice(tx.price)}</div>
                   <div className="text-xs text-gray-500">per token</div>
                 </div>
 
                 {/* Total Value */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="font-bold text-white">{tx.total}</div>
+                  <div className="font-bold text-white">${tx.volume.toFixed(2)}</div>
                   <div className="text-xs text-gray-500">total</div>
                 </div>
 
                 {/* Time */}
                 <div className="text-right flex flex-col justify-center">
-                  <div className="text-sm">
-                    {formatDistanceToNow(tx.timestamp, { addSuffix: true })}
+                  <div className="text-sm text-blue-400">
+                    {formatDistanceToNow(new Date(tx.timestamp * 1000), { addSuffix: true })}
                   </div>
                   <div className="text-xs text-gray-500">
-                    {tx.timestamp.toLocaleTimeString()}
+                    {new Date(tx.timestamp * 1000).toLocaleTimeString()}
                   </div>
                 </div>
               </a>
