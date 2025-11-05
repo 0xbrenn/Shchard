@@ -34,7 +34,10 @@ const PAIR_ABI = [
 ];
 
 const FACTORY_ABI = [
-  'function getPair(address tokenA, address tokenB) view returns (address pair)'
+  'function getPair(address tokenA, address tokenB) view returns (address pair)',
+  'function allPairs(uint256 index) view returns (address pair)',
+  'function allPairsLength() view returns (uint256)',
+  'event PairCreated(address indexed token0, address indexed token1, address pair, uint256)'
 ];
 
 // Pair cache for fast lookups
@@ -59,15 +62,22 @@ async function connectWebSocket() {
 
     wsProvider = new ethers.WebSocketProvider(OPN_WS);
 
-    // Set up reconnection handlers
-    wsProvider.on('error', (error) => {
-      console.error('❌ WebSocket error:', error.message);
-    });
+    // Access the underlying WebSocket for close event (ethers.js v6 fix)
+    if (wsProvider.websocket) {
+      wsProvider.websocket.on('close', () => {
+        console.log('⚠️ WebSocket closed, reconnecting in 5 seconds...');
+        wsProvider = null;
+        setTimeout(async () => {
+          await connectWebSocket();
+          // Re-subscribe to all tokens after reconnect
+          await resubscribeAll();
+        }, 5000);
+      });
+    }
 
-    wsProvider.on('close', () => {
-      console.log('⚠️ WebSocket closed, reconnecting in 5 seconds...');
-      wsProvider = null;
-      setTimeout(connectWebSocket, 5000);
+    // Handle provider-level errors
+    wsProvider.on('error', (error) => {
+      console.error('❌ WebSocket provider error:', error.message);
     });
 
     // Wait a bit to see if connection succeeds
@@ -238,6 +248,72 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
 
 // Keep track of subscribed tokens
 const subscribedTokens = new Set();
+
+// Discover all pairs from factory and index them
+async function discoverAndIndexAllPairs() {
+  try {
+    console.log('🔍 Discovering all pairs from factory...');
+    const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
+    const pairCount = await factory.allPairsLength();
+    console.log(`   Found ${pairCount} pairs in factory`);
+
+    // Get current block
+    const currentBlock = await provider.getBlockNumber();
+    const startBlock = Math.max(0, currentBlock - 100000); // Go back 100k blocks
+
+    for (let i = 0; i < pairCount; i++) {
+      try {
+        const pairAddress = await factory.allPairs(i);
+        const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
+
+        const token0 = await pairContract.token0();
+        const token1 = await pairContract.token1();
+
+        // Determine which token is WOPN
+        const isToken0WOPN = token0.toLowerCase() === WOPN_ADDRESS.toLowerCase();
+        const isToken1WOPN = token1.toLowerCase() === WOPN_ADDRESS.toLowerCase();
+
+        if (!isToken0WOPN && !isToken1WOPN) {
+          console.log(`   Skipping pair ${i}: No WOPN token`);
+          continue;
+        }
+
+        const tokenAddress = isToken0WOPN ? token1 : token0;
+        console.log(`   [${i + 1}/${pairCount}] Indexing pair ${pairAddress.substring(0, 10)}... (token: ${tokenAddress.substring(0, 10)}...)`);
+
+        // Cache the pair
+        pairCache.set(tokenAddress.toLowerCase(), pairAddress);
+
+        // Index swaps for this token from 100k blocks ago
+        await indexTokenSwaps(tokenAddress, startBlock);
+
+        // Subscribe to real-time swaps
+        await subscribeToRealTimeSwaps(tokenAddress);
+
+      } catch (error) {
+        console.error(`   Error processing pair ${i}:`, error.message);
+      }
+    }
+
+    console.log(`✅ Finished indexing all pairs`);
+  } catch (error) {
+    console.error('Error discovering pairs:', error.message);
+  }
+}
+
+// Re-subscribe to all tokens after WebSocket reconnect
+async function resubscribeAll() {
+  if (subscribedTokens.size === 0) return;
+
+  console.log(`🔄 Re-subscribing to ${subscribedTokens.size} tokens after reconnect...`);
+  const tokens = Array.from(subscribedTokens);
+  subscribedTokens.clear(); // Clear so we can re-subscribe
+
+  for (const tokenAddress of tokens) {
+    await subscribeToRealTimeSwaps(tokenAddress);
+  }
+  console.log(`✅ Re-subscribed to all tokens`);
+}
 
 // Subscribe to real-time swaps
 async function subscribeToRealTimeSwaps(tokenAddress) {
@@ -587,12 +663,11 @@ server.listen(PORT, async () => {
   console.log(`🚀 Shchard Backend running on port ${PORT}`);
   await connectWebSocket();
 
-  // Index WOPN on startup
+  // Proactively discover and index ALL pairs from factory
   setTimeout(() => {
-    console.log(`🏁 Starting WOPN indexing and subscription...`);
-    indexTokenSwaps(WOPN_ADDRESS);
-    subscribeToRealTimeSwaps(WOPN_ADDRESS);
-  }, 2000);
+    console.log(`🏁 Starting proactive pair discovery and indexing...`);
+    discoverAndIndexAllPairs(); // Run in background
+  }, 3000);
 
   // Heartbeat every 30 seconds to show we're alive
   setInterval(() => {
