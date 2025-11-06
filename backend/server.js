@@ -40,8 +40,15 @@ const FACTORY_ABI = [
   'event PairCreated(address indexed token0, address indexed token1, address pair, uint256)'
 ];
 
+const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)'
+];
+
 // Pair cache for fast lookups
 const pairCache = new Map(); // tokenAddress -> pairAddress
+const tokenMetadataCache = new Map(); // tokenAddress -> {name, symbol, decimals}
 
 // HTTP provider for queries
 const provider = new ethers.JsonRpcProvider(OPN_RPC);
@@ -121,6 +128,56 @@ async function findPair(tokenAddress) {
   }
 
   return null;
+}
+
+// Fetch and cache token metadata (name, symbol, decimals)
+async function fetchTokenMetadata(tokenAddress) {
+  const lowerToken = tokenAddress.toLowerCase();
+
+  // Check cache first
+  if (tokenMetadataCache.has(lowerToken)) {
+    return tokenMetadataCache.get(lowerToken);
+  }
+
+  // Check database
+  const dbToken = db.getToken(lowerToken);
+  if (dbToken && dbToken.symbol) {
+    const metadata = {
+      name: dbToken.name,
+      symbol: dbToken.symbol,
+      decimals: dbToken.decimals
+    };
+    tokenMetadataCache.set(lowerToken, metadata);
+    return metadata;
+  }
+
+  // Fetch from blockchain
+  try {
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const [name, symbol, decimals] = await Promise.all([
+      tokenContract.name().catch(() => 'Unknown'),
+      tokenContract.symbol().catch(() => 'UNKNOWN'),
+      tokenContract.decimals().catch(() => 18)
+    ]);
+
+    const metadata = { name, symbol, decimals };
+
+    // Save to database
+    const pairAddress = await findPair(tokenAddress);
+    db.upsertToken(lowerToken, name, symbol, decimals, pairAddress);
+
+    // Cache it
+    tokenMetadataCache.set(lowerToken, metadata);
+
+    console.log(`📋 Fetched metadata for ${tokenAddress}: ${symbol} (${name})`);
+    return metadata;
+  } catch (error) {
+    console.error(`Failed to fetch metadata for ${tokenAddress}:`, error.message);
+    // Return fallback
+    const metadata = { name: 'Unknown Token', symbol: 'UNKNOWN', decimals: 18 };
+    tokenMetadataCache.set(lowerToken, metadata);
+    return metadata;
+  }
 }
 
 // Process swap event into standardized format
@@ -283,6 +340,9 @@ async function discoverAndIndexAllPairs() {
 
         // Cache the pair
         pairCache.set(tokenAddress.toLowerCase(), pairAddress);
+
+        // Fetch and cache token metadata
+        await fetchTokenMetadata(tokenAddress);
 
         // Index swaps for this token from 100k blocks ago
         await indexTokenSwaps(tokenAddress, startBlock);
@@ -562,9 +622,13 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     // Get recent transactions (last 50, newest first)
     const transactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
 
+    // Fetch token metadata
+    const tokenMetadata = await fetchTokenMetadata(tokenAddress);
+
     res.json({
       candles, // Already sorted oldest to newest
-      transactions // Already newest first from DB
+      transactions, // Already newest first from DB
+      tokenMetadata // Include token name, symbol, decimals
     });
 
   } catch (error) {

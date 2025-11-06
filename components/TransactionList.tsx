@@ -13,6 +13,7 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
   const [transactions, setTransactions] = useState<BackendTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [newTxHighlight, setNewTxHighlight] = useState<string | null>(null);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('TOKEN');
   const wsRef = useRef<BackendWebSocket | null>(null);
 
   // Helper to safely convert to number
@@ -61,6 +62,10 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
         const response = await fetchChartData(tokenAddress, "1H");
         // Backend returns transactions newest first, so no need to reverse
         setTransactions(response.transactions || []);
+        // Set token symbol from metadata
+        if (response.tokenMetadata) {
+          setTokenSymbol(response.tokenMetadata.symbol);
+        }
       } catch (err) {
         console.error("Failed to load transactions:", err);
       } finally {
@@ -176,8 +181,8 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                   {/* Token Amount */}
                   <div className="col-span-2 text-right flex flex-col justify-center">
-                    <div className="font-medium data-number">{formatTokenAmount(tx.tokenAmount)}</div>
-                    <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>tokens</div>
+                    <div className="font-medium data-number">{formatTokenAmount(tx.tokenAmount)} {tokenSymbol}</div>
+                    <div className="text-xs" style={{color: 'var(--text-tertiary)'}}>{formatTokenAmount(tx.wopnAmount)} OPN</div>
                   </div>
 
                   {/* Price */}
@@ -235,17 +240,19 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
 
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <div className="text-xs text-gray-400">Price</div>
-                    <div className="font-medium text-cyan-400">{formatPrice(tx.price)}</div>
+                    <div className="text-xs text-gray-400">Amount</div>
+                    <div className="font-medium text-white">{formatTokenAmount(tx.tokenAmount)} {tokenSymbol}</div>
+                    <div className="text-xs text-gray-500">{formatTokenAmount(tx.wopnAmount)} OPN</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-gray-400">Total</div>
+                    <div className="text-xs text-gray-400">Total Value</div>
                     <div className="font-bold text-white">{formatVolume(tx.volume)}</div>
+                    <div className="text-xs text-cyan-400">{formatPrice(tx.price)}/token</div>
                   </div>
                 </div>
 
                 <div className="mt-2 text-xs text-gray-500 flex items-center justify-between">
-                  <span>{formatTokenAmount(tx.tokenAmount)} tokens</span>
+                  <span>Block #{tx.blockNumber}</span>
                   <span>{new Date(tx.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
               </a>

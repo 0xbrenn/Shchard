@@ -21,9 +21,16 @@ export interface BackendTransaction {
   wopnAmount: number;
 }
 
+export interface TokenMetadata {
+  name: string;
+  symbol: string;
+  decimals: number;
+}
+
 export interface ChartDataResponse {
   candles: BackendCandle[];
   transactions: BackendTransaction[];
+  tokenMetadata?: TokenMetadata;
 }
 
 export interface TokenInfoResponse {
