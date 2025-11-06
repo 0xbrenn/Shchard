@@ -332,15 +332,20 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
         // Calculate price change
         const firstPrice = candles[0].open;
-        const lastPrice = candles[candles.length - 1].close;
-        const change = lastPrice - firstPrice;
+
+        // Use latest transaction price if available (more accurate than last candle)
+        const latestPrice = response.transactions && response.transactions.length > 0
+          ? response.transactions[0].price
+          : candles[candles.length - 1].close;
+
+        const change = latestPrice - firstPrice;
         const changePercent = (change / firstPrice) * 100;
         setPriceChange({ change, changePercent });
 
-        setCurrentPrice(lastPrice);
+        setCurrentPrice(latestPrice);
 
         // Set price scale precision based on price
-        const decimals = getPriceDecimals(lastPrice);
+        const decimals = getPriceDecimals(latestPrice);
         chartRef.current.priceScale("right").applyOptions({
           autoScale: true,
           scaleMargins: {
@@ -380,8 +385,8 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
           // Add price line marker for current price
           candlestickSeries.createPriceLine({
-            price: lastPrice,
-            color: lastPrice >= candles[0].open ? "#22c55e" : "#ef4444",
+            price: latestPrice,
+            color: latestPrice >= candles[0].open ? "#22c55e" : "#ef4444",
             lineWidth: 2,
             lineStyle: 2, // Dashed line
             axisLabelVisible: true,
@@ -408,7 +413,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
           // Add price line marker for current price
           lineSeries.createPriceLine({
-            price: lastPrice,
+            price: latestPrice,
             color: "#8b5cf6",
             lineWidth: 2,
             lineStyle: 2, // Dashed line
@@ -591,6 +596,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
           {/* Timeframe buttons - horizontal scroll on mobile */}
           <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="text-xs text-gray-400 mb-2 md:hidden">Candle Interval:</div>
             <div className="flex gap-2 min-w-max">
               {timeframes.map((tf) => (
                 <button
@@ -638,7 +644,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
         {/* Time Range Zoom Controls - horizontal scroll on mobile */}
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-          <span className="text-xs text-gray-400 mr-2 flex-shrink-0">Time Range:</span>
+          <span className="text-xs text-gray-400 mr-2 flex-shrink-0">Zoom:</span>
           <div className="flex gap-2 min-w-max">
             {['1h', '4h', '1d', '3d', '1w', '30d', 'ALL'].map((range) => (
               <button

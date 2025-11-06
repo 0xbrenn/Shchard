@@ -216,7 +216,7 @@ async function processSwapEvent(event, tokenAddress, isToken0) {
       price: priceInUSD,
       volume: volumeUSD,
       blockNumber: block.number,
-      txHash: event.transactionHash,
+      txHash: event.log?.transactionHash || event.transactionHash,
       type: isBuy ? 'buy' : 'sell',
       tokenAmount: tokenAmountNum,
       wopnAmount: wopnAmountNum
