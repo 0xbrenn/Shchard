@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import dotenv from 'dotenv';
 import * as db from './database.js';
+import { LogIndexer } from './indexer.js';
 
 dotenv.config();
 
@@ -25,6 +26,15 @@ const OPN_WS = process.env.OPN_WS || 'wss://testnet-rpc.iopn.tech/ws';
 const OPN_PRICE = 0.05;
 const FACTORY_ADDRESS = '0x8860242B65611dfd077aEe26C3C7920813dF9208';
 const WOPN_ADDRESS = '0xBc022C9dEb5AF250A526321d16Ef52E39b4DBD84';
+
+// Initialize log-based indexer
+const indexer = new LogIndexer({
+  rpcUrl: OPN_RPC,
+  wsUrl: OPN_WS,
+  factoryAddress: FACTORY_ADDRESS,
+  wopnAddress: WOPN_ADDRESS,
+  opnPrice: OPN_PRICE
+});
 
 const PAIR_ABI = [
   'function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)',
@@ -675,8 +685,17 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     // Get recent transactions (last 50, newest first)
     const transactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
 
-    // Fetch token metadata
-    const tokenMetadata = await fetchTokenMetadata(tokenAddress);
+    // Get token metadata from database (indexer already saved it)
+    const token = db.getToken(tokenAddress.toLowerCase());
+    const tokenMetadata = token ? {
+      name: token.name,
+      symbol: token.symbol,
+      decimals: token.decimals
+    } : {
+      name: 'Unknown',
+      symbol: 'UNKNOWN',
+      decimals: 18
+    };
 
     res.json({
       candles, // Already sorted oldest to newest with 'time' field
@@ -745,19 +764,15 @@ app.get('/api/token/:tokenAddress', async (req, res) => {
   }
 });
 
-// Index a new token
+// Index a new token (deprecated - indexer does this automatically now)
 app.post('/api/index/:tokenAddress', async (req, res) => {
-  try {
-    const { tokenAddress } = req.params;
-    await indexTokenSwaps(tokenAddress);
-    await subscribeToRealTimeSwaps(tokenAddress);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  res.json({
+    success: true,
+    message: 'Log-based indexer handles all tokens automatically'
+  });
 });
 
-// WebSocket connection handler
+// WebSocket connection handler (simplified - indexer handles all events)
 wss.on('connection', (ws) => {
   console.log('👤 New WebSocket client connected (total clients:', wss.clients.size + ')');
 
@@ -771,20 +786,11 @@ wss.on('connection', (ws) => {
         // Check if we have data for this token
         const swaps = db.getTokenSwaps(data.tokenAddress.toLowerCase(), 1);
 
-        if (swaps.length === 0) {
-          console.log(`   No data found, indexing ${data.tokenAddress}...`);
-          await indexTokenSwaps(data.tokenAddress);
-        }
-
-        // Subscribe to real-time updates
-        await subscribeToRealTimeSwaps(data.tokenAddress);
-
         ws.send(JSON.stringify({
           type: 'subscribed',
-          tokenAddress: data.tokenAddress
+          tokenAddress: data.tokenAddress,
+          hasData: swaps.length > 0
         }));
-
-        console.log(`   ✓ Client subscribed to ${data.tokenAddress}`);
       }
     } catch (error) {
       console.error('WebSocket message error:', error);
@@ -796,12 +802,13 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Status endpoint to check subscriptions
+// Status endpoint to check indexer status
 app.get('/api/status', (req, res) => {
   res.json({
-    wsConnected: wsProvider !== null,
-    subscribedTokens: Array.from(subscribedTokens),
-    connectedClients: wss.clients.size
+    indexerActive: indexer.isRealtime,
+    lastIndexedBlock: db.getLastIndexedBlockGlobal(),
+    connectedClients: wss.clients.size,
+    tokensCount: db.getAllTokens().length
   });
 });
 
@@ -810,13 +817,11 @@ const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, async () => {
   console.log(`🚀 Shchard Backend running on port ${PORT}`);
-  await connectWebSocket();
 
-  // Proactively discover and index ALL pairs from factory
-  setTimeout(() => {
-    console.log(`🏁 Starting proactive pair discovery and indexing...`);
-    discoverAndIndexAllPairs(); // Run in background
-  }, 3000);
+  // Initialize the log-based indexer
+  setTimeout(async () => {
+    await indexer.initialize();
+  }, 1000);
 
   // Heartbeat every 30 seconds to show we're alive
   setInterval(() => {

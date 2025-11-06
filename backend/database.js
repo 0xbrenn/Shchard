@@ -75,6 +75,15 @@ function initializeDatabase() {
     )
   `);
 
+  // Indexer state table - tracks indexing progress
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS indexer_state (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )
+  `);
+
   // Create indexes for faster queries
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_swaps_token ON swaps(token_address, timestamp DESC);
@@ -351,6 +360,30 @@ function getAllPairs() {
   return pairQueries.getAll.all();
 }
 
+// Indexer state queries
+const indexerStateQueries = {
+  get: db.prepare(`
+    SELECT value FROM indexer_state WHERE key = ?
+  `),
+  set: db.prepare(`
+    INSERT INTO indexer_state (key, value, updated_at)
+    VALUES (?, ?, strftime('%s', 'now'))
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = excluded.updated_at
+  `)
+};
+
+// Indexer state functions
+function getLastIndexedBlockGlobal() {
+  const result = indexerStateQueries.get.get('last_indexed_block');
+  return result?.value || null;
+}
+
+function setLastIndexedBlockGlobal(blockNumber) {
+  return indexerStateQueries.set.run('last_indexed_block', blockNumber);
+}
+
 export {
   db,
   initializeDatabase,
@@ -371,7 +404,11 @@ export {
 
   // Candle functions
   buildAndSaveCandles,
-  getCandles
+  getCandles,
+
+  // Indexer state functions
+  getLastIndexedBlockGlobal,
+  setLastIndexedBlockGlobal
 };
 
 export const getToken = (address) => tokenQueries.getByAddress.get(address);
