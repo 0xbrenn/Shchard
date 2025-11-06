@@ -49,6 +49,9 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   const handleLiveSwap = (swapData: SwapUpdate) => {
     const swap = swapData.data;
     console.log("💹 Live swap received:", swap);
+    console.log("   Current chart type:", chartType);
+    console.log("   Series exists:", !!seriesRef.current);
+    console.log("   Data length:", currentDataRef.current.length);
 
     setCurrentPrice(swap.price);
     setLiveSwapIndicator(swap);
@@ -59,15 +62,21 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     }, 3000);
 
     // Update chart with new price
-    if (seriesRef.current && currentDataRef.current.length > 0 && chartType === "candlestick") {
-      const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
-      const candleInterval = getTimeframeSeconds(timeframe);
+    if (!seriesRef.current || currentDataRef.current.length === 0) {
+      console.log("⚠️ Chart not ready for updates");
+      return;
+    }
 
-      // Calculate which candle time slot this swap belongs to
-      const swapCandleTime = Math.floor(swap.timestamp / candleInterval) * candleInterval;
+    const candleInterval = getTimeframeSeconds(timeframe);
+    const swapCandleTime = Math.floor(swap.timestamp / candleInterval) * candleInterval;
+
+    if (chartType === "candlestick") {
+      const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
       const lastCandleTime = lastCandle.time as number;
 
-      console.log(`📊 Swap at ${swap.timestamp}, belongs to candle ${swapCandleTime}, last candle is ${lastCandleTime}`);
+      console.log(`📊 Candlestick update: swap at ${swap.timestamp} (${new Date(swap.timestamp * 1000).toISOString()})`);
+      console.log(`   Swap candle time: ${swapCandleTime}, Last candle time: ${lastCandleTime}`);
+      console.log(`   Swap price: ${swap.price}`);
 
       if (swapCandleTime > lastCandleTime) {
         // This swap belongs to a NEW candle period
@@ -99,6 +108,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         };
         currentDataRef.current.push(newCandle);
         (seriesRef.current as ISeriesApi<"Candlestick">).update(newCandle);
+        console.log(`✅ New candle created at ${swapCandleTime} with price ${swap.price}`);
       } else if (swapCandleTime === lastCandleTime) {
         // This swap belongs to the CURRENT candle period - update it
         console.log("📝 Updating current candle");
@@ -111,10 +121,22 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         };
         currentDataRef.current[currentDataRef.current.length - 1] = updatedCandle;
         (seriesRef.current as ISeriesApi<"Candlestick">).update(updatedCandle);
+        console.log(`✅ Candle updated: O:${updatedCandle.open} H:${updatedCandle.high} L:${updatedCandle.low} C:${updatedCandle.close}`);
       } else {
         // This swap is for an old candle (shouldn't happen in real-time)
         console.log("⚠️ Swap belongs to old candle, ignoring");
       }
+    } else if (chartType === "line") {
+      // Update line chart
+      console.log(`📈 Line chart update: adding point at ${swapCandleTime} with value ${swap.price}`);
+
+      const newPoint: LineData = {
+        time: swapCandleTime as UTCTimestamp,
+        value: swap.price,
+      };
+
+      (seriesRef.current as ISeriesApi<"Line">).update(newPoint);
+      console.log(`✅ Line chart updated with price ${swap.price}`);
     }
   };
 
