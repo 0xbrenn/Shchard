@@ -292,13 +292,14 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   }
 
   // Now fill in gaps with zero-volume candles using previous close
-  const firstTimestamp = swaps[0].timestamp;
+  // Note: swaps are ordered DESC (newest first), so swaps[swaps.length-1] is oldest
+  const firstTimestamp = swaps[swaps.length - 1].timestamp; // Oldest swap
   const now = Math.floor(Date.now() / 1000);
-  const lastTimestamp = Math.max(swaps[swaps.length - 1].timestamp, now - (intervalSeconds * 100));
+  const lastTimestamp = Math.max(swaps[0].timestamp, now - (intervalSeconds * 100)); // Newest swap
   const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
   const endTime = Math.floor(lastTimestamp / intervalSeconds) * intervalSeconds;
 
-  let previousClose = swaps[0].price;
+  let previousClose = swaps[swaps.length - 1].price; // Start with oldest price
   const allCandles = {};
 
   for (let time = startTime; time <= endTime; time += intervalSeconds) {
@@ -342,7 +343,10 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   })).sort((a, b) => a.time - b.time);
 
   console.log(`      ✅ Saved ${candleArray.length} candles to database`);
-  console.log(`      Time range: ${new Date(candleArray[0].time * 1000).toISOString()} to ${new Date(candleArray[candleArray.length - 1].time * 1000).toISOString()}`);
+
+  if (candleArray.length > 0) {
+    console.log(`      Time range: ${new Date(candleArray[0].time * 1000).toISOString()} to ${new Date(candleArray[candleArray.length - 1].time * 1000).toISOString()}`);
+  }
 
   // Return candles array
   return candleArray;
