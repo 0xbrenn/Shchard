@@ -154,11 +154,14 @@ async function fetchTokenMetadata(tokenAddress) {
   // Fetch from blockchain
   try {
     const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-    const [name, symbol, decimals] = await Promise.all([
+    const [name, symbol, decimalsRaw] = await Promise.all([
       tokenContract.name().catch(() => 'Unknown'),
       tokenContract.symbol().catch(() => 'UNKNOWN'),
       tokenContract.decimals().catch(() => 18)
     ]);
+
+    // Convert BigInt to Number for JSON serialization
+    const decimals = typeof decimalsRaw === 'bigint' ? Number(decimalsRaw) : decimalsRaw;
 
     const metadata = { name, symbol, decimals };
 
