@@ -487,7 +487,8 @@ function buildCandles(swaps, intervalSeconds) {
 
   const candles = [];
   const firstTimestamp = swaps[0].timestamp;
-  const lastTimestamp = swaps[swaps.length - 1].timestamp;
+  const now = Math.floor(Date.now() / 1000);
+  const lastTimestamp = Math.max(swaps[swaps.length - 1].timestamp, now - (intervalSeconds * 100)); // Extend to recent time
   const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
   const endTime = Math.floor(lastTimestamp / intervalSeconds) * intervalSeconds;
 
@@ -498,6 +499,7 @@ function buildCandles(swaps, intervalSeconds) {
     const periodSwaps = swaps.filter(s => s.timestamp >= time && s.timestamp < periodEnd);
 
     if (periodSwaps.length === 0) {
+      // No swaps in this period - use previous close price
       candles.push({
         time,
         open: previousClose,
@@ -616,7 +618,11 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     if (candles.length === 0) {
       // Build and save candles
       const intervalSeconds = timeframeMap[timeframe] || 3600;
+      console.log(`📊 Building ${timeframe} candles (${intervalSeconds}s intervals) for ${tokenAddress}`);
       candles = db.buildAndSaveCandles(tokenAddress.toLowerCase(), timeframe, intervalSeconds);
+      console.log(`   Built ${candles.length} candles`);
+    } else {
+      console.log(`📊 Using ${candles.length} cached ${timeframe} candles for ${tokenAddress}`);
     }
 
     // Ensure candles are sorted oldest to newest (ASC by time)

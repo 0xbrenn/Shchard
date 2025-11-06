@@ -256,13 +256,14 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
 
   if (swaps.length === 0) return [];
 
-  const candles = {};
+  // First, build candles from actual swaps
+  const swapCandles = {};
 
   for (const swap of swaps) {
     const candleTime = Math.floor(swap.timestamp / intervalSeconds) * intervalSeconds;
 
-    if (!candles[candleTime]) {
-      candles[candleTime] = {
+    if (!swapCandles[candleTime]) {
+      swapCandles[candleTime] = {
         open: swap.price,
         high: swap.price,
         low: swap.price,
@@ -270,10 +271,37 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
         volume: swap.volume
       };
     } else {
-      candles[candleTime].high = Math.max(candles[candleTime].high, swap.price);
-      candles[candleTime].low = Math.min(candles[candleTime].low, swap.price);
-      candles[candleTime].close = swap.price;
-      candles[candleTime].volume += swap.volume;
+      swapCandles[candleTime].high = Math.max(swapCandles[candleTime].high, swap.price);
+      swapCandles[candleTime].low = Math.min(swapCandles[candleTime].low, swap.price);
+      swapCandles[candleTime].close = swap.price;
+      swapCandles[candleTime].volume += swap.volume;
+    }
+  }
+
+  // Now fill in gaps with zero-volume candles using previous close
+  const firstTimestamp = swaps[0].timestamp;
+  const now = Math.floor(Date.now() / 1000);
+  const lastTimestamp = Math.max(swaps[swaps.length - 1].timestamp, now - (intervalSeconds * 100));
+  const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
+  const endTime = Math.floor(lastTimestamp / intervalSeconds) * intervalSeconds;
+
+  let previousClose = swaps[0].price;
+  const allCandles = {};
+
+  for (let time = startTime; time <= endTime; time += intervalSeconds) {
+    if (swapCandles[time]) {
+      // Use actual swap candle
+      allCandles[time] = swapCandles[time];
+      previousClose = swapCandles[time].close;
+    } else {
+      // Fill gap with zero-volume candle
+      allCandles[time] = {
+        open: previousClose,
+        high: previousClose,
+        low: previousClose,
+        close: previousClose,
+        volume: 0
+      };
     }
   }
 
@@ -293,10 +321,10 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
     }
   });
 
-  insertCandles(candles);
+  insertCandles(allCandles);
 
   // Return candles array
-  return Object.entries(candles).map(([timestamp, candle]) => ({
+  return Object.entries(allCandles).map(([timestamp, candle]) => ({
     time: parseInt(timestamp),
     ...candle
   })).sort((a, b) => a.time - b.time);
