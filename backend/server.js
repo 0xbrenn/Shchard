@@ -33,7 +33,8 @@ const indexer = new LogIndexer({
   wsUrl: OPN_WS,
   factoryAddress: FACTORY_ADDRESS,
   wopnAddress: WOPN_ADDRESS,
-  opnPrice: OPN_PRICE
+  opnPrice: OPN_PRICE,
+  deploymentBlockOffset: 100000 // Start indexing from 100k blocks ago (when DEX was deployed)
 });
 
 const PAIR_ABI = [

@@ -44,6 +44,7 @@ export class LogIndexer {
     this.factoryAddress = config.factoryAddress.toLowerCase();
     this.wopnAddress = config.wopnAddress.toLowerCase();
     this.opnPrice = config.opnPrice || 0.05;
+    this.deploymentBlockOffset = config.deploymentBlockOffset || 100000; // Start 100k blocks ago by default
 
     this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
     this.wsProvider = null;
@@ -77,9 +78,20 @@ export class LogIndexer {
       const lastIndexed = db.getLastIndexedBlockGlobal();
       console.log(`   Last indexed block: ${lastIndexed || 'None'}`);
 
+      // Determine start block
+      let startBlock;
+      if (lastIndexed) {
+        // Resume from last indexed
+        startBlock = lastIndexed + 1;
+      } else {
+        // First time: start from deployment block (current - offset)
+        startBlock = Math.max(0, blockNumber - this.deploymentBlockOffset);
+        console.log(`   Starting from deployment block (${this.deploymentBlockOffset} blocks ago): ${startBlock}`);
+      }
+
       // Start historical indexing if needed
-      if (!lastIndexed || blockNumber - lastIndexed > 10) {
-        await this.startHistoricalIndexing(lastIndexed || 0, blockNumber);
+      if (blockNumber - startBlock > 10) {
+        await this.startHistoricalIndexing(startBlock, blockNumber);
       } else {
         console.log('   Already caught up with chain');
       }
