@@ -629,12 +629,14 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
 
     // Check if we have data in database
     console.log(`\n📊 Chart API Request: ${tokenAddress} | Timeframe: ${timeframe}`);
+    console.log(`   Database path: ${db.db.name}`);
+
     let swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
-    console.log(`   Found ${swaps.length} swaps in database`);
+    console.log(`   Found ${swaps.length} swaps in database for ${tokenAddress}`);
 
     if (swaps.length > 0) {
-      console.log(`   First swap: Block ${swaps[0].block_number}, Price: $${swaps[0].price.toFixed(8)}`);
-      console.log(`   Last swap: Block ${swaps[swaps.length - 1].block_number}, Price: $${swaps[swaps.length - 1].price.toFixed(8)}`);
+      console.log(`   First swap: Block ${swaps[0].block_number}, Time: ${new Date(swaps[0].timestamp * 1000).toISOString()}, Price: $${swaps[0].price.toFixed(8)}`);
+      console.log(`   Last swap: Block ${swaps[swaps.length - 1].block_number}, Time: ${new Date(swaps[swaps.length - 1].timestamp * 1000).toISOString()}, Price: $${swaps[swaps.length - 1].price.toFixed(8)}`);
     }
 
     // If no swaps, check if token exists in database (might be newly discovered)
@@ -662,6 +664,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     }
 
     // Try to get pre-calculated candles from database
+    const candleStartTime = Date.now();
     let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 1000);
     console.log(`   Found ${candles.length} pre-calculated ${timeframe} candles in database`);
 
@@ -669,15 +672,21 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
       // Build and save candles
       const intervalSeconds = timeframeMap[timeframe] || 3600;
       console.log(`   Building ${timeframe} candles (${intervalSeconds}s intervals) from ${swaps.length} swaps...`);
+      const buildStartTime = Date.now();
       candles = db.buildAndSaveCandles(tokenAddress.toLowerCase(), timeframe, intervalSeconds);
-      console.log(`   ✅ Built and saved ${candles.length} candles`);
+      const buildTime = Date.now() - buildStartTime;
+      console.log(`   ✅ Built and saved ${candles.length} candles in ${buildTime}ms`);
 
       if (candles.length > 0) {
-        console.log(`   First candle: Time ${candles[0].time || candles[0].timestamp}, Close: $${candles[0].close.toFixed(8)}`);
-        console.log(`   Last candle: Time ${candles[candles.length - 1].time || candles[candles.length - 1].timestamp}, Close: $${candles[candles.length - 1].close.toFixed(8)}`);
+        console.log(`   First candle: Time ${candles[0].time || candles[0].timestamp} (${new Date((candles[0].time || candles[0].timestamp) * 1000).toISOString()}), Close: $${candles[0].close.toFixed(8)}`);
+        console.log(`   Last candle: Time ${candles[candles.length - 1].time || candles[candles.length - 1].timestamp} (${new Date((candles[candles.length - 1].time || candles[candles.length - 1].timestamp) * 1000).toISOString()}), Close: $${candles[candles.length - 1].close.toFixed(8)}`);
       }
     } else {
-      console.log(`   Using ${candles.length} cached ${timeframe} candles`);
+      const cacheTime = Date.now() - candleStartTime;
+      console.log(`   ✅ Using ${candles.length} cached ${timeframe} candles (loaded in ${cacheTime}ms)`);
+      if (candles.length > 0) {
+        console.log(`   Candle range: ${new Date((candles[0].timestamp || candles[0].time) * 1000).toISOString()} to ${new Date((candles[candles.length - 1].timestamp || candles[candles.length - 1].time) * 1000).toISOString()}`);
+      }
     }
 
     // Ensure candles are sorted oldest to newest (ASC by time)
