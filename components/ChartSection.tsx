@@ -14,6 +14,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [timeframe, setTimeframe] = useState<Timeframe>("1H");
   const [chartType, setChartType] = useState<"candlestick" | "line">("candlestick");
   const [loading, setLoading] = useState(false);
@@ -153,8 +154,16 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         fontSize: 12,
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.04)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.04)" },
+        vertLines: {
+          color: "rgba(255, 255, 255, 0.04)",
+          style: 1, // Dotted lines
+          visible: true,
+        },
+        horzLines: {
+          color: "rgba(255, 255, 255, 0.06)",
+          style: 1, // Dotted lines
+          visible: true,
+        },
       },
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
@@ -164,29 +173,43 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         borderColor: "rgba(255, 255, 255, 0.1)",
         barSpacing: 8,
         minBarSpacing: 4,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        lockVisibleTimeRangeOnResize: true,
+        rightBarStaysOnScroll: true,
+        borderVisible: true,
+        visible: true,
       },
       rightPriceScale: {
         borderColor: "rgba(255, 255, 255, 0.1)",
         autoScale: true,
-        mode: 0,
+        mode: 0, // Normal mode
         scaleMargins: {
           top: 0.1,
           bottom: 0.1,
         },
+        borderVisible: true,
+        visible: true,
+        alignLabels: true,
+        entireTextOnly: false,
       },
       crosshair: {
-        mode: 1, // Normal crosshair
+        mode: 1, // Magnet mode - snaps to data points
         vertLine: {
-          color: "rgba(236, 72, 153, 0.6)",
+          color: "rgba(236, 72, 153, 0.8)",
           width: 1,
-          style: 2,
+          style: 2, // Dashed
           labelBackgroundColor: "#ec4899",
+          labelVisible: true,
+          visible: true,
         },
         horzLine: {
-          color: "rgba(139, 92, 246, 0.6)",
+          color: "rgba(139, 92, 246, 0.8)",
           width: 1,
-          style: 2,
+          style: 2, // Dashed
           labelBackgroundColor: "#8b5cf6",
+          labelVisible: true,
+          visible: true,
         },
       },
       handleScroll: {
@@ -204,6 +227,18 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         priceFormatter: (price: number) => {
           return formatPrice(price);
         },
+        timeFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        },
+      },
+      watermark: {
+        visible: true,
+        fontSize: 48,
+        horzAlign: "center",
+        vertAlign: "center",
+        color: "rgba(236, 72, 153, 0.1)",
+        text: "SHCHARD",
       },
     });
 
@@ -285,6 +320,16 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           }
         }
 
+        // Remove old volume series if exists
+        if (volumeSeriesRef.current && chartRef.current) {
+          try {
+            chartRef.current.removeSeries(volumeSeriesRef.current);
+            volumeSeriesRef.current = null;
+          } catch (e) {
+            // Series might already be removed
+          }
+        }
+
         // Calculate price change
         const firstPrice = candles[0].open;
         const lastPrice = candles[candles.length - 1].close;
@@ -300,7 +345,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           autoScale: true,
           scaleMargins: {
             top: 0.1,
-            bottom: 0.1,
+            bottom: 0.3, // More space for volume bars at bottom
           },
         });
 
@@ -332,6 +377,16 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           candlestickSeries.setData(candleData);
           seriesRef.current = candlestickSeries;
           currentDataRef.current = candleData;
+
+          // Add price line marker for current price
+          candlestickSeries.createPriceLine({
+            price: lastPrice,
+            color: lastPrice >= candles[0].open ? "#22c55e" : "#ef4444",
+            lineWidth: 2,
+            lineStyle: 2, // Dashed line
+            axisLabelVisible: true,
+            title: "Current",
+          });
         } else {
           const lineSeries = chartRef.current.addLineSeries({
             color: "#8b5cf6",
@@ -350,7 +405,46 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
           lineSeries.setData(lineData);
           seriesRef.current = lineSeries;
+
+          // Add price line marker for current price
+          lineSeries.createPriceLine({
+            price: lastPrice,
+            color: "#8b5cf6",
+            lineWidth: 2,
+            lineStyle: 2, // Dashed line
+            axisLabelVisible: true,
+            title: "Current",
+          });
         }
+
+        // Add volume histogram below the chart
+        const volumeSeries = chartRef.current.addHistogramSeries({
+          color: "#26a69a",
+          priceFormat: {
+            type: "volume",
+          },
+          priceScaleId: "", // Use separate scale for volume
+        });
+
+        volumeSeries.priceScale().applyOptions({
+          scaleMargins: {
+            top: 0.7, // Volume takes bottom 30% of chart
+            bottom: 0,
+          },
+        });
+
+        // Prepare volume data with color based on price direction
+        const volumeData = candles.map((d, index) => {
+          const isUp = index === 0 ? true : d.close >= candles[index - 1].close;
+          return {
+            time: d.time as UTCTimestamp,
+            value: d.volume,
+            color: isUp ? "rgba(34, 197, 94, 0.5)" : "rgba(239, 68, 68, 0.5)",
+          };
+        });
+
+        volumeSeries.setData(volumeData);
+        volumeSeriesRef.current = volumeSeries;
 
         chartRef.current.timeScale().fitContent();
       } catch (error) {
