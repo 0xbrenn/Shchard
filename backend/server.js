@@ -620,7 +620,17 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     }
 
     // Ensure candles are sorted oldest to newest (ASC by time)
-    candles = candles.sort((a, b) => a.time - b.time);
+    candles = candles.sort((a, b) => (a.timestamp || a.time) - (b.timestamp || b.time));
+
+    // Map candles to ensure 'time' field is set (frontend expects 'time', not 'timestamp')
+    candles = candles.map(c => ({
+      time: c.timestamp || c.time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume
+    }));
 
     // Get recent transactions (last 50, newest first)
     const transactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
@@ -629,7 +639,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     const tokenMetadata = await fetchTokenMetadata(tokenAddress);
 
     res.json({
-      candles, // Already sorted oldest to newest
+      candles, // Already sorted oldest to newest with 'time' field
       transactions, // Already newest first from DB
       tokenMetadata // Include token name, symbol, decimals
     });
