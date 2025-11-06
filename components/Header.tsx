@@ -17,8 +17,9 @@ export default function Header({ onTokenSelect }: HeaderProps) {
   };
 
   return (
-    <header className="glass-strong border-b border-[rgba(236,72,153,0.3)] p-4">
-      <div className="flex items-center justify-between">
+    <header className="glass-strong border-b border-[rgba(236,72,153,0.3)] p-3 md:p-4">
+      {/* Desktop Layout */}
+      <div className="hidden md:flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-bold gradient-text">Shchard</h1>
           <span className="text-sm text-gray-400">OPN Chain</span>
@@ -47,6 +48,37 @@ export default function Header({ onTokenSelect }: HeaderProps) {
             Connect Wallet
           </button>
         </div>
+      </div>
+
+      {/* Mobile Layout */}
+      <div className="md:hidden flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold gradient-text">Shchard</h1>
+            <span className="text-xs text-gray-400">OPN</span>
+          </div>
+          <button className="btn-gradient px-3 py-1.5 rounded text-xs font-medium glow-blue">
+            Connect
+          </button>
+        </div>
+
+        <form onSubmit={handleSearch} className="w-full">
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search token address..."
+              className="w-full glass border border-[rgba(139,92,246,0.3)] rounded-lg px-3 py-2 pr-20 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#8b5cf6] focus:glow-purple transition-all"
+            />
+            <button
+              type="submit"
+              className="absolute right-2 top-1/2 -translate-y-1/2 btn-gradient px-3 py-1 rounded text-xs font-medium glow-pink"
+            >
+              Search
+            </button>
+          </div>
+        </form>
       </div>
     </header>
   );

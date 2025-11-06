@@ -454,32 +454,37 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
       {/* Chart Controls */}
       <div className="px-4 py-3 border-b border-[rgba(236,72,153,0.2)]">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex gap-2">
-            {timeframes.map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                disabled={!tokenAddress}
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-                  timeframe === tf
-                    ? "btn-gradient text-white glow-purple"
-                    : "glass text-gray-400 hover:text-white"
-                } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                {tf}
-              </button>
-            ))}
+        {/* Timeframe and Chart Type Controls */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+          {/* Timeframe buttons - horizontal scroll on mobile */}
+          <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="flex gap-2 min-w-max">
+              {timeframes.map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  disabled={!tokenAddress}
+                  className={`flex-shrink-0 px-4 py-2 rounded text-sm font-medium transition-all min-w-[44px] min-h-[44px] md:min-h-0 md:py-1.5 md:px-3 ${
+                    timeframe === tf
+                      ? "btn-gradient text-white glow-purple"
+                      : "glass text-gray-400 hover:text-white active:scale-95"
+                  } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* Chart type buttons */}
           <div className="flex gap-2">
             <button
               onClick={() => setChartType("candlestick")}
               disabled={!tokenAddress}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+              className={`flex-1 md:flex-initial px-4 py-2 rounded text-sm font-medium transition-all min-h-[44px] md:min-h-0 md:py-1.5 md:px-3 ${
                 chartType === "candlestick"
                   ? "btn-gradient text-white glow-pink"
-                  : "glass text-gray-400 hover:text-white"
+                  : "glass text-gray-400 hover:text-white active:scale-95"
               } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               📊 Candlestick
@@ -487,10 +492,10 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             <button
               onClick={() => setChartType("line")}
               disabled={!tokenAddress}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+              className={`flex-1 md:flex-initial px-4 py-2 rounded text-sm font-medium transition-all min-h-[44px] md:min-h-0 md:py-1.5 md:px-3 ${
                 chartType === "line"
                   ? "btn-gradient text-white glow-blue"
-                  : "glass text-gray-400 hover:text-white"
+                  : "glass text-gray-400 hover:text-white active:scale-95"
               } ${!tokenAddress ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               📈 Line
@@ -498,21 +503,23 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           </div>
         </div>
 
-        {/* Time Range Zoom Controls */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400 mr-2">Time Range:</span>
-          {['1h', '4h', '1d', '3d', '1w', '30d', 'ALL'].map((range) => (
-            <button
-              key={range}
-              onClick={() => handleTimeRange(range)}
-              disabled={!tokenAddress}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-all glass text-gray-400 hover:text-white hover:border-glow ${
-                !tokenAddress ? "opacity-50 cursor-not-allowed" : ""
-              }`}
-            >
-              {range}
-            </button>
-          ))}
+        {/* Time Range Zoom Controls - horizontal scroll on mobile */}
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+          <span className="text-xs text-gray-400 mr-2 flex-shrink-0">Time Range:</span>
+          <div className="flex gap-2 min-w-max">
+            {['1h', '4h', '1d', '3d', '1w', '30d', 'ALL'].map((range) => (
+              <button
+                key={range}
+                onClick={() => handleTimeRange(range)}
+                disabled={!tokenAddress}
+                className={`flex-shrink-0 px-3 py-2 rounded text-xs font-medium transition-all glass text-gray-400 hover:text-white hover:border-glow active:scale-95 min-w-[44px] min-h-[44px] md:min-h-0 md:py-1 md:px-2.5 ${
+                  !tokenAddress ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

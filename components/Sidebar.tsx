@@ -36,8 +36,8 @@ export default function Sidebar({ selectedToken, onTokenSelect }: SidebarProps) 
   };
 
   return (
-    <aside className="w-72 glass-strong border-r border-[rgba(236,72,153,0.3)] overflow-y-auto flex flex-col">
-      <div className="p-4 flex-1">
+    <aside className="w-72 lg:w-72 h-full glass-strong border-r border-[rgba(236,72,153,0.3)] overflow-y-auto flex flex-col">
+      <div className="p-4 flex-1 pb-safe">
         <h2 className="text-lg font-semibold mb-4 gradient-text">Available Tokens</h2>
 
         <div className="space-y-2">
