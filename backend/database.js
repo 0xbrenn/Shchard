@@ -182,7 +182,7 @@ const candleQueries = {
   getByTokenAndTimeframe: db.prepare(`
     SELECT * FROM candles
     WHERE token_address = ? AND timeframe = ?
-    ORDER BY timestamp DESC
+    ORDER BY timestamp ASC
     LIMIT ?
   `),
 
@@ -253,8 +253,12 @@ function upsertPair(pair) {
 // Build candles from swaps
 function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   const swaps = swapQueries.getByToken.all(tokenAddress, 10000); // Get more swaps for accurate candles
+  console.log(`      🏗️  Building candles: ${swaps.length} swaps, ${intervalSeconds}s interval`);
 
-  if (swaps.length === 0) return [];
+  if (swaps.length === 0) {
+    console.log(`      ❌ No swaps to build candles from`);
+    return [];
+  }
 
   // First, build candles from actual swaps
   const swapCandles = {};
@@ -323,11 +327,16 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
 
   insertCandles(allCandles);
 
-  // Return candles array
-  return Object.entries(allCandles).map(([timestamp, candle]) => ({
+  const candleArray = Object.entries(allCandles).map(([timestamp, candle]) => ({
     time: parseInt(timestamp),
     ...candle
   })).sort((a, b) => a.time - b.time);
+
+  console.log(`      ✅ Saved ${candleArray.length} candles to database`);
+  console.log(`      Time range: ${new Date(candleArray[0].time * 1000).toISOString()} to ${new Date(candleArray[candleArray.length - 1].time * 1000).toISOString()}`);
+
+  // Return candles array
+  return candleArray;
 }
 
 function getCandles(tokenAddress, timeframe, limit = 1000) {

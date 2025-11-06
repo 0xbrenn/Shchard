@@ -595,34 +595,68 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     };
 
     // Check if we have data in database
+    console.log(`\n📊 Chart API Request: ${tokenAddress} | Timeframe: ${timeframe}`);
     let swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
+    console.log(`   Found ${swaps.length} swaps in database`);
+
+    if (swaps.length > 0) {
+      console.log(`   First swap: Block ${swaps[0].block_number}, Price: $${swaps[0].price.toFixed(8)}`);
+      console.log(`   Last swap: Block ${swaps[swaps.length - 1].block_number}, Price: $${swaps[swaps.length - 1].price.toFixed(8)}`);
+    }
 
     if (swaps.length === 0) {
-      // Index if not already
-      await indexTokenSwaps(tokenAddress);
-      await subscribeToRealTimeSwaps(tokenAddress);
-      swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
+      // Try to index if not already (may fail if RPC unavailable)
+      console.log(`   No swaps found, attempting to index token...`);
+      try {
+        await indexTokenSwaps(tokenAddress);
+        await subscribeToRealTimeSwaps(tokenAddress);
+        swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
+        console.log(`   After indexing: ${swaps.length} swaps`);
+      } catch (error) {
+        console.log(`   ⚠️  Indexing failed (RPC unavailable): ${error.message}`);
+        console.log(`   Will return mock data for testing`);
+      }
     }
 
     if (swaps.length === 0) {
       // Return mock data for testing when no real data available
-      console.log('⚠️  No swaps found, returning mock data for testing');
+      console.log('⚠️  No swaps found - RPC may be unavailable. Returning mock data for testing.');
+      console.log('   This allows chart development/testing while RPC connection is being established.');
       const mockCandles = generateMockCandles(200);
       const mockTransactions = generateMockTransactions(50);
-      return res.json({ candles: mockCandles, transactions: mockTransactions });
+
+      // Add mock token metadata
+      const tokenMetadata = {
+        name: 'Test Token (Mock Data)',
+        symbol: 'TEST',
+        decimals: 18
+      };
+
+      return res.json({
+        candles: mockCandles,
+        transactions: mockTransactions,
+        tokenMetadata,
+        isMockData: true // Flag to indicate this is test data
+      });
     }
 
     // Try to get pre-calculated candles from database
     let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 1000);
+    console.log(`   Found ${candles.length} pre-calculated ${timeframe} candles in database`);
 
     if (candles.length === 0) {
       // Build and save candles
       const intervalSeconds = timeframeMap[timeframe] || 3600;
-      console.log(`📊 Building ${timeframe} candles (${intervalSeconds}s intervals) for ${tokenAddress}`);
+      console.log(`   Building ${timeframe} candles (${intervalSeconds}s intervals) from ${swaps.length} swaps...`);
       candles = db.buildAndSaveCandles(tokenAddress.toLowerCase(), timeframe, intervalSeconds);
-      console.log(`   Built ${candles.length} candles`);
+      console.log(`   ✅ Built and saved ${candles.length} candles`);
+
+      if (candles.length > 0) {
+        console.log(`   First candle: Time ${candles[0].time || candles[0].timestamp}, Close: $${candles[0].close.toFixed(8)}`);
+        console.log(`   Last candle: Time ${candles[candles.length - 1].time || candles[candles.length - 1].timestamp}, Close: $${candles[candles.length - 1].close.toFixed(8)}`);
+      }
     } else {
-      console.log(`📊 Using ${candles.length} cached ${timeframe} candles for ${tokenAddress}`);
+      console.log(`   Using ${candles.length} cached ${timeframe} candles`);
     }
 
     // Ensure candles are sorted oldest to newest (ASC by time)
@@ -652,6 +686,35 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching chart data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to inspect database state
+app.get('/api/debug/:tokenAddress', async (req, res) => {
+  try {
+    const { tokenAddress } = req.params;
+    const lowerToken = tokenAddress.toLowerCase();
+
+    const swaps = db.getTokenSwaps(lowerToken, 100);
+    const candles1M = db.getCandles(lowerToken, '1M', 50);
+    const candles1H = db.getCandles(lowerToken, '1H', 50);
+
+    res.json({
+      tokenAddress: lowerToken,
+      swapCount: swaps.length,
+      swaps: swaps.slice(0, 5), // First 5 swaps
+      candles1M: {
+        count: candles1M.length,
+        samples: candles1M.slice(0, 3)
+      },
+      candles1H: {
+        count: candles1H.length,
+        samples: candles1H.slice(0, 3)
+      }
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
     res.status(500).json({ error: error.message });
   }
 });
