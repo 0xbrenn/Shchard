@@ -637,39 +637,27 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
       console.log(`   Last swap: Block ${swaps[swaps.length - 1].block_number}, Price: $${swaps[swaps.length - 1].price.toFixed(8)}`);
     }
 
+    // If no swaps, check if token exists in database (might be newly discovered)
     if (swaps.length === 0) {
-      // Try to index if not already (may fail if RPC unavailable)
-      console.log(`   No swaps found, attempting to index token...`);
-      try {
-        await indexTokenSwaps(tokenAddress);
-        await subscribeToRealTimeSwaps(tokenAddress);
-        swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
-        console.log(`   After indexing: ${swaps.length} swaps`);
-      } catch (error) {
-        console.log(`   ⚠️  Indexing failed (RPC unavailable): ${error.message}`);
-        console.log(`   Will return mock data for testing`);
+      const token = db.getToken(tokenAddress.toLowerCase());
+      if (token) {
+        console.log(`   Token found in database: ${token.symbol} - waiting for swaps to be indexed`);
+      } else {
+        console.log(`   Token not found - will be auto-indexed when first swap occurs or PairCreated event is detected`);
       }
-    }
 
-    if (swaps.length === 0) {
-      // Return mock data for testing when no real data available
-      console.log('⚠️  No swaps found - RPC may be unavailable. Returning mock data for testing.');
-      console.log('   This allows chart development/testing while RPC connection is being established.');
-      const mockCandles = generateMockCandles(200);
-      const mockTransactions = generateMockTransactions(50);
-
-      // Add mock token metadata
-      const tokenMetadata = {
-        name: 'Test Token (Mock Data)',
-        symbol: 'TEST',
-        decimals: 18
-      };
-
+      // Return empty data - indexer will handle it automatically
       return res.json({
-        candles: mockCandles,
-        transactions: mockTransactions,
-        tokenMetadata,
-        isMockData: true // Flag to indicate this is test data
+        candles: [],
+        transactions: [],
+        tokenMetadata: {
+          name: token?.name || 'Loading...',
+          symbol: token?.symbol || 'LOADING',
+          decimals: token?.decimals || 18
+        },
+        message: token
+          ? 'Token indexed, waiting for swap data'
+          : 'Token will be automatically indexed when discovered'
       });
     }
 
