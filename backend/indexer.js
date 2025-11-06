@@ -50,6 +50,7 @@ export class LogIndexer {
     this.wopnAddress = config.wopnAddress.toLowerCase();
     this.opnPrice = config.opnPrice || 0.05;
     this.deploymentBlockOffset = config.deploymentBlockOffset || 100000; // Start 100k blocks ago by default
+    this.onNewSwap = config.onNewSwap || null; // Callback for real-time swaps
 
     this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
     this.wsProvider = null;
@@ -179,7 +180,7 @@ export class LogIndexer {
 
           if (logs.length > 0) {
             console.log(`   Found ${logs.length} events in block`);
-            await this.processLogs(logs);
+            await this.processLogs(logs, true); // isRealtime = true for live broadcast
           }
 
           // Update last indexed block
@@ -259,7 +260,7 @@ export class LogIndexer {
   /**
    * Process logs and save to database
    */
-  async processLogs(logs) {
+  async processLogs(logs, isRealtime = false) {
     const pairCreatedLogs = [];
     const swapLogs = [];
     const syncLogs = [];
@@ -283,7 +284,7 @@ export class LogIndexer {
     }
 
     if (swapLogs.length > 0) {
-      await this.processSwaps(swapLogs);
+      await this.processSwaps(swapLogs, isRealtime);
     }
 
     if (syncLogs.length > 0) {
@@ -349,7 +350,7 @@ export class LogIndexer {
   /**
    * Process Swap events
    */
-  async processSwaps(logs) {
+  async processSwaps(logs, isRealtime = false) {
     console.log(`   Processing ${logs.length} Swap events...`);
 
     const swaps = [];
@@ -403,6 +404,11 @@ export class LogIndexer {
         }, pairInfo);
 
         swaps.push(swap);
+
+        // Broadcast real-time swaps to frontend via callback
+        if (isRealtime && this.onNewSwap) {
+          this.onNewSwap(swap);
+        }
       } catch (error) {
         console.error(`      ✗ Error processing Swap at ${log.transactionHash}:`, error.message);
       }

@@ -34,7 +34,29 @@ const indexer = new LogIndexer({
   factoryAddress: FACTORY_ADDRESS,
   wopnAddress: WOPN_ADDRESS,
   opnPrice: OPN_PRICE,
-  deploymentBlockOffset: 100000 // Start indexing from 100k blocks ago (when DEX was deployed)
+  deploymentBlockOffset: 100000, // Start indexing from 100k blocks ago (when DEX was deployed)
+  onNewSwap: (swap) => {
+    // Broadcast new swap to all connected WebSocket clients
+    console.log(`📡 Broadcasting swap: ${swap.tokenAddress} - $${swap.price.toFixed(8)}`);
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // OPEN
+        client.send(JSON.stringify({
+          type: 'swap',
+          tokenAddress: swap.tokenAddress,
+          data: {
+            timestamp: swap.timestamp,
+            price: swap.price,
+            volume: swap.volume,
+            blockNumber: swap.blockNumber,
+            txHash: swap.txHash,
+            type: swap.type,
+            tokenAmount: swap.tokenAmount,
+            wopnAmount: swap.wopnAmount
+          }
+        }));
+      }
+    });
+  }
 });
 
 const PAIR_ABI = [
