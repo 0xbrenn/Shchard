@@ -61,16 +61,37 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     // Update chart with new price
     if (seriesRef.current && currentDataRef.current.length > 0 && chartType === "candlestick") {
       const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
-      const currentTime = Math.floor(swap.timestamp) as UTCTimestamp;
-
-      // Check if we need to create a new candle or update the existing one
-      const timeDiff = currentTime - (lastCandle.time as number);
       const candleInterval = getTimeframeSeconds(timeframe);
 
-      if (timeDiff >= candleInterval) {
-        // Create new candle
+      // Calculate which candle time slot this swap belongs to
+      const swapCandleTime = Math.floor(swap.timestamp / candleInterval) * candleInterval;
+      const lastCandleTime = lastCandle.time as number;
+
+      console.log(`📊 Swap at ${swap.timestamp}, belongs to candle ${swapCandleTime}, last candle is ${lastCandleTime}`);
+
+      if (swapCandleTime > lastCandleTime) {
+        // This swap belongs to a NEW candle period
+        console.log("🆕 Creating new candle");
+
+        // Fill any gaps between last candle and this new candle
+        let fillTime = lastCandleTime + candleInterval;
+        while (fillTime < swapCandleTime) {
+          const gapCandle: CandlestickData = {
+            time: fillTime as UTCTimestamp,
+            open: lastCandle.close,
+            high: lastCandle.close,
+            low: lastCandle.close,
+            close: lastCandle.close,
+          };
+          currentDataRef.current.push(gapCandle);
+          (seriesRef.current as ISeriesApi<"Candlestick">).update(gapCandle);
+          console.log(`  📋 Filled gap candle at ${fillTime}`);
+          fillTime += candleInterval;
+        }
+
+        // Now create the candle with the actual swap
         const newCandle: CandlestickData = {
-          time: currentTime,
+          time: swapCandleTime as UTCTimestamp,
           open: swap.price,
           high: swap.price,
           low: swap.price,
@@ -78,8 +99,9 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         };
         currentDataRef.current.push(newCandle);
         (seriesRef.current as ISeriesApi<"Candlestick">).update(newCandle);
-      } else {
-        // Update current candle
+      } else if (swapCandleTime === lastCandleTime) {
+        // This swap belongs to the CURRENT candle period - update it
+        console.log("📝 Updating current candle");
         const updatedCandle: CandlestickData = {
           time: lastCandle.time,
           open: lastCandle.open,
@@ -89,6 +111,9 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
         };
         currentDataRef.current[currentDataRef.current.length - 1] = updatedCandle;
         (seriesRef.current as ISeriesApi<"Candlestick">).update(updatedCandle);
+      } else {
+        // This swap is for an old candle (shouldn't happen in real-time)
+        console.log("⚠️ Swap belongs to old candle, ignoring");
       }
     }
   };
@@ -129,6 +154,48 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       setIsLive(false);
     };
   }, [tokenAddress]);
+
+  // Automatic candle advancement timer (advances candles even without swaps)
+  useEffect(() => {
+    if (!seriesRef.current || !currentDataRef.current.length || chartType !== "candlestick") return;
+
+    const candleInterval = getTimeframeSeconds(timeframe);
+
+    // Check every second if we need to advance to a new candle
+    const timer = setInterval(() => {
+      if (currentDataRef.current.length === 0) return;
+
+      const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
+      const now = Math.floor(Date.now() / 1000);
+      const currentCandleTime = Math.floor(now / candleInterval) * candleInterval;
+      const lastCandleTime = lastCandle.time as number;
+
+      // If we've moved into a new candle period
+      if (currentCandleTime > lastCandleTime) {
+        console.log(`⏰ Timer: Advancing candle from ${lastCandleTime} to ${currentCandleTime}`);
+
+        // Fill gaps between last candle and current time
+        let fillTime = lastCandleTime + candleInterval;
+        while (fillTime <= currentCandleTime) {
+          const newCandle: CandlestickData = {
+            time: fillTime as UTCTimestamp,
+            open: lastCandle.close,
+            high: lastCandle.close,
+            low: lastCandle.close,
+            close: lastCandle.close,
+          };
+          currentDataRef.current.push(newCandle);
+          if (seriesRef.current) {
+            (seriesRef.current as ISeriesApi<"Candlestick">).update(newCandle);
+          }
+          console.log(`  📋 Auto-created candle at ${fillTime}`);
+          fillTime += candleInterval;
+        }
+      }
+    }, 1000); // Check every second
+
+    return () => clearInterval(timer);
+  }, [timeframe, chartType, seriesRef.current, currentDataRef.current.length]);
 
   // Chart setup and data loading effect
   useEffect(() => {
