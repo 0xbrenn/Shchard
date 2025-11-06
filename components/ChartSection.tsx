@@ -131,7 +131,19 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
   // Chart setup and data loading effect
   useEffect(() => {
-    if (!chartContainerRef.current || !tokenAddress) return;
+    if (!chartContainerRef.current || !tokenAddress) {
+      console.log("⚠️ Chart container or token address missing", {
+        hasContainer: !!chartContainerRef.current,
+        tokenAddress
+      });
+      return;
+    }
+
+    console.log("📊 Initializing chart for:", tokenAddress);
+    console.log("Container dimensions:", {
+      width: chartContainerRef.current.clientWidth,
+      height: chartContainerRef.current.clientHeight
+    });
 
     // Create chart with TradingView-like professional styling
     const chart = createChart(chartContainerRef.current, {
@@ -209,32 +221,47 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
           return;
         }
 
+        console.log(`📊 Received ${response.candles.length} candles from backend`);
+        console.log("First candle sample:", response.candles[0]);
+
         // Filter and validate candle data
         const candles = response.candles.filter(c => {
-          if (!c || !c.time) return false;
+          if (!c || !c.time) {
+            console.log("❌ Rejected candle: missing time", c);
+            return false;
+          }
 
           // For line chart, we only need close price
           if (chartType === 'line') {
-            return c.close != null && !isNaN(parseFloat(c.close));
+            const valid = c.close != null && !isNaN(parseFloat(String(c.close)));
+            if (!valid) console.log("❌ Rejected line candle:", c);
+            return valid;
           }
 
           // For candlestick, we need all OHLC values
-          return c.open != null && !isNaN(parseFloat(c.open)) &&
-                 c.high != null && !isNaN(parseFloat(c.high)) &&
-                 c.low != null && !isNaN(parseFloat(c.low)) &&
-                 c.close != null && !isNaN(parseFloat(c.close));
+          const valid = c.open != null && !isNaN(parseFloat(String(c.open))) &&
+                 c.high != null && !isNaN(parseFloat(String(c.high))) &&
+                 c.low != null && !isNaN(parseFloat(String(c.low))) &&
+                 c.close != null && !isNaN(parseFloat(String(c.close)));
+
+          if (!valid) {
+            console.log("❌ Rejected candlestick:", c);
+          }
+          return valid;
         }).map(c => ({
           ...c,
-          time: typeof c.time === 'number' ? c.time : parseInt(c.time),
-          open: typeof c.open === 'number' ? c.open : parseFloat(c.open || 0),
-          high: typeof c.high === 'number' ? c.high : parseFloat(c.high || 0),
-          low: typeof c.low === 'number' ? c.low : parseFloat(c.low || 0),
-          close: typeof c.close === 'number' ? c.close : parseFloat(c.close),
-          volume: typeof c.volume === 'number' ? c.volume : parseFloat(c.volume || 0)
+          time: typeof c.time === 'number' ? c.time : parseInt(String(c.time)),
+          open: typeof c.open === 'number' ? c.open : parseFloat(String(c.open || 0)),
+          high: typeof c.high === 'number' ? c.high : parseFloat(String(c.high || 0)),
+          low: typeof c.low === 'number' ? c.low : parseFloat(String(c.low || 0)),
+          close: typeof c.close === 'number' ? c.close : parseFloat(String(c.close)),
+          volume: typeof c.volume === 'number' ? c.volume : parseFloat(String(c.volume || 0))
         }));
 
         if (candles.length === 0) {
-          console.log("No valid candle data after filtering - check if backend returned OHLC data");
+          console.log("❌ No valid candle data after filtering");
+          console.log("Chart type:", chartType);
+          console.log("Original candles sample:", response.candles.slice(0, 3));
           setLoading(false);
           return;
         }
@@ -376,30 +403,42 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
 
   // Time range zoom options (like TradingView)
   const handleTimeRange = (range: string) => {
-    if (!chartRef.current) return;
-
-    const timeScale = chartRef.current.timeScale();
-    const now = Math.floor(Date.now() / 1000);
-
-    let from: number;
-    switch (range) {
-      case '1h': from = now - 3600; break;
-      case '4h': from = now - 4 * 3600; break;
-      case '1d': from = now - 24 * 3600; break;
-      case '3d': from = now - 3 * 24 * 3600; break;
-      case '1w': from = now - 7 * 24 * 3600; break;
-      case '30d': from = now - 30 * 24 * 3600; break;
-      case 'ALL':
-        timeScale.fitContent();
-        return;
-      default: return;
+    if (!chartRef.current) {
+      console.log("⚠️ Chart not initialized, skipping time range change");
+      return;
     }
 
-    timeScale.setVisibleRange({ from: from as UTCTimestamp, to: now as UTCTimestamp });
+    try {
+      const timeScale = chartRef.current.timeScale();
+      if (!timeScale) {
+        console.log("⚠️ TimeScale not available");
+        return;
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+
+      let from: number;
+      switch (range) {
+        case '1h': from = now - 3600; break;
+        case '4h': from = now - 4 * 3600; break;
+        case '1d': from = now - 24 * 3600; break;
+        case '3d': from = now - 3 * 24 * 3600; break;
+        case '1w': from = now - 7 * 24 * 3600; break;
+        case '30d': from = now - 30 * 24 * 3600; break;
+        case 'ALL':
+          timeScale.fitContent();
+          return;
+        default: return;
+      }
+
+      timeScale.setVisibleRange({ from: from as UTCTimestamp, to: now as UTCTimestamp });
+    } catch (error) {
+      console.error("Error setting time range:", error);
+    }
   };
 
   return (
-    <div className="flex-1 flex flex-col glass-strong border-b border-[rgba(236,72,153,0.2)]">
+    <div className="flex-1 flex flex-col glass-strong border-b border-[rgba(236,72,153,0.2)] h-full overflow-hidden">
       {/* Price Header */}
       {tokenAddress && (
         <div className="px-4 py-3 border-b border-[rgba(139,92,246,0.2)]">
@@ -524,7 +563,7 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       </div>
 
       {/* Chart */}
-      <div className="flex-1 relative glass" style={{ minHeight: '500px' }}>
+      <div className="flex-1 relative glass" style={{ minHeight: '400px' }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center glass-strong z-10">
             <div className="text-center">
