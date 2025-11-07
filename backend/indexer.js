@@ -169,10 +169,16 @@ export class LogIndexer {
 
     try {
       // Connect to WebSocket
+      console.log(`🔌 Connecting to WebSocket RPC at ${this.wsUrl}`);
       this.wsProvider = new ethers.WebSocketProvider(this.wsUrl);
+
+      let lastBlockTime = Date.now();
+      let reconnectAttempts = 0;
 
       this.wsProvider.on('block', async (blockNumber) => {
         console.log(`\n📦 New block: ${blockNumber}`);
+        lastBlockTime = Date.now();
+        reconnectAttempts = 0; // Reset on successful block
 
         try {
           // Get logs from this block
@@ -190,15 +196,74 @@ export class LogIndexer {
         }
       });
 
+      // Handle provider errors
+      this.wsProvider.on('error', (error) => {
+        console.error('❌ WebSocket provider error:', error.code || error.message);
+      });
+
+      // Monitor connection health with keepalive
+      const keepaliveInterval = setInterval(async () => {
+        if (!this.isRealtime || !this.wsProvider) {
+          clearInterval(keepaliveInterval);
+          return;
+        }
+
+        const timeSinceLastBlock = Date.now() - lastBlockTime;
+
+        // If no block for 2 minutes, check connection health
+        if (timeSinceLastBlock > 120000) {
+          console.log(`⚠️  No blocks for ${Math.floor(timeSinceLastBlock / 1000)}s, checking connection...`);
+
+          try {
+            // Try to fetch current block number to test connection
+            const currentBlock = await this.wsProvider.getBlockNumber();
+            console.log(`   ✅ Connection healthy, current block: ${currentBlock}`);
+            lastBlockTime = Date.now();
+          } catch (error) {
+            console.error(`   ❌ Connection test failed: ${error.message}`);
+            console.log(`   🔄 Forcing reconnection...`);
+            clearInterval(keepaliveInterval);
+            this.isRealtime = false;
+
+            if (this.wsProvider) {
+              try {
+                this.wsProvider.destroy();
+              } catch (e) {
+                // Ignore destroy errors
+              }
+              this.wsProvider = null;
+            }
+
+            setTimeout(() => this.startRealtimeIndexing(), 5000);
+          }
+        }
+      }, 30000); // Check every 30 seconds
+
       this.isRealtime = true;
       console.log('✅ Real-time indexing started');
+      console.log('   Keepalive: Checking connection health every 30s');
 
       // Handle disconnections
       if (this.wsProvider.websocket) {
-        this.wsProvider.websocket.on('close', () => {
-          console.log('⚠️  WebSocket closed, reconnecting...');
+        this.wsProvider.websocket.on('close', (code, reason) => {
+          console.log(`⚠️  WebSocket closed (code: ${code}, reason: ${reason || 'none'})`);
+          reconnectAttempts++;
+
+          clearInterval(keepaliveInterval);
           this.isRealtime = false;
-          setTimeout(() => this.startRealtimeIndexing(), 5000);
+
+          const delay = Math.min(5000 * reconnectAttempts, 30000); // Max 30s delay
+          console.log(`   🔄 Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})...`);
+          setTimeout(() => this.startRealtimeIndexing(), delay);
+        });
+
+        this.wsProvider.websocket.on('error', (error) => {
+          console.error('❌ WebSocket connection error:', error.code || error.message);
+        });
+
+        // Handle pong responses (some providers support this)
+        this.wsProvider.websocket.on('pong', () => {
+          // Connection is alive
         });
       }
     } catch (error) {
