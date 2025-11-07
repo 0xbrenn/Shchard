@@ -427,6 +427,118 @@ function setLastIndexedBlockGlobal(blockNumber) {
   return indexerStateQueries.set.run('last_indexed_block', blockNumber);
 }
 
+// Build candles progressively with streaming batches
+function buildCandlesProgressively(tokenAddress, timeframe, intervalSeconds, onBatchCallback) {
+  const BATCH_SIZE = 100; // Send 100 candles at a time
+  const swaps = swapQueries.getByToken.all(tokenAddress, 10000);
+
+  if (swaps.length === 0) {
+    console.log(`      ❌ No swaps to build candles from`);
+    return;
+  }
+
+  // Build swap candles first (quick)
+  const swapCandles = {};
+  for (const swap of swaps) {
+    const candleTime = Math.floor(swap.timestamp / intervalSeconds) * intervalSeconds;
+    if (!swapCandles[candleTime]) {
+      swapCandles[candleTime] = {
+        open: swap.price,
+        high: swap.price,
+        low: swap.price,
+        close: swap.price,
+        volume: swap.volume
+      };
+    } else {
+      swapCandles[candleTime].high = Math.max(swapCandles[candleTime].high, swap.price);
+      swapCandles[candleTime].low = Math.min(swapCandles[candleTime].low, swap.price);
+      swapCandles[candleTime].close = swap.price;
+      swapCandles[candleTime].volume += swap.volume;
+    }
+  }
+
+  // Calculate time range
+  const now = Math.floor(Date.now() / 1000);
+  const maxHistorySeconds = 7 * 24 * 60 * 60;
+  const firstTimestamp = swaps[swaps.length - 1].timestamp;
+  const effectiveStartTime = Math.max(firstTimestamp, now - maxHistorySeconds);
+  const startTime = Math.floor(effectiveStartTime / intervalSeconds) * intervalSeconds;
+  const endTime = Math.floor(now / intervalSeconds) * intervalSeconds;
+
+  const totalCandles = Math.ceil((endTime - startTime) / intervalSeconds);
+  console.log(`      🏗️  Progressive build: ${totalCandles} candles in batches of ${BATCH_SIZE}`);
+
+  let candlesBuilt = 0;
+  let batchIndex = 0;
+  let previousClose = null;
+
+  // Find first price
+  const sortedTimes = Object.keys(swapCandles).map(t => parseInt(t)).sort((a, b) => a - b);
+  if (sortedTimes.length > 0) {
+    previousClose = swapCandles[sortedTimes[0]].open;
+  }
+
+  // Build and stream in batches
+  for (let batchStart = startTime; batchStart <= endTime; batchStart += intervalSeconds * BATCH_SIZE) {
+    const batchCandles = [];
+    const batchEnd = Math.min(batchStart + (intervalSeconds * BATCH_SIZE), endTime + intervalSeconds);
+
+    for (let time = batchStart; time < batchEnd && time <= endTime; time += intervalSeconds) {
+      let candle;
+      if (swapCandles[time]) {
+        candle = swapCandles[time];
+        previousClose = candle.close;
+      } else if (previousClose !== null) {
+        candle = {
+          open: previousClose,
+          high: previousClose,
+          low: previousClose,
+          close: previousClose,
+          volume: 0
+        };
+      } else {
+        continue;
+      }
+
+      // Save to database
+      candleQueries.upsert.run(
+        tokenAddress,
+        timeframe,
+        time,
+        candle.open,
+        candle.high,
+        candle.low,
+        candle.close,
+        candle.volume
+      );
+
+      batchCandles.push({
+        time,
+        ...candle
+      });
+
+      candlesBuilt++;
+    }
+
+    // Call callback with batch
+    if (batchCandles.length > 0 && onBatchCallback) {
+      onBatchCallback({
+        batch: batchIndex,
+        candles: batchCandles,
+        progress: {
+          current: candlesBuilt,
+          total: totalCandles,
+          percent: Math.floor((candlesBuilt / totalCandles) * 100)
+        }
+      });
+    }
+
+    batchIndex++;
+  }
+
+  console.log(`      ✅ Progressive build complete: ${candlesBuilt} candles in ${batchIndex} batches`);
+}
+
 // Update candles in real-time when a new swap arrives
 function updateCandlesWithSwap(swap) {
   const timeframeMap = {
@@ -519,6 +631,7 @@ export {
 
   // Candle functions
   buildAndSaveCandles,
+  buildCandlesProgressively,
   getCandles,
   updateCandlesWithSwap,
 

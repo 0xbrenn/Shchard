@@ -22,8 +22,11 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   const [currentPrice, setCurrentPrice] = useState(0);
   const [liveSwapIndicator, setLiveSwapIndicator] = useState<SwapUpdate["data"] | null>(null);
   const [isLive, setIsLive] = useState(false);
+  const [buildProgress, setBuildProgress] = useState(0);
+  const [isBuilding, setIsBuilding] = useState(false);
   const currentDataRef = useRef<CandlestickData[]>([]);
   const wsRef = useRef<BackendWebSocket | null>(null);
+  const currentBuildJobRef = useRef<string | null>(null);
 
   // Helper function to determine decimal places for price
   const getPriceDecimals = (price: number): number => {
@@ -45,9 +48,76 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     return price.toFixed(decimals);
   };
 
-  // Handle live updates from backend (swaps and pre-calculated candle updates)
+  // Handle live updates from backend (swaps, candle updates, and progressive batches)
   const handleLiveSwap = (message: any) => {
-    // Handle pre-calculated candle updates from backend (preferred method)
+    // Handle progressive candle batches (during initial build)
+    if (message.type === 'candles:batch') {
+      // Only process if it's for our current build job and timeframe
+      if (message.buildJob !== currentBuildJobRef.current || message.timeframe !== timeframe) {
+        return;
+      }
+
+      console.log(`📦 Batch ${message.batch.batch}: ${message.batch.candles.length} candles (${message.batch.progress.percent}%)`);
+
+      if (!seriesRef.current || !chartRef.current) {
+        console.log("⚠️ Chart not ready for batch updates");
+        return;
+      }
+
+      // Append candles to chart
+      const batchCandles = message.batch.candles.map((c: any) => ({
+        time: c.time as UTCTimestamp,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }));
+
+      if (chartType === "candlestick") {
+        batchCandles.forEach((candle: CandlestickData) => {
+          currentDataRef.current.push(candle);
+          (seriesRef.current as ISeriesApi<"Candlestick">).update(candle);
+        });
+      } else if (chartType === "line") {
+        batchCandles.forEach((candle: CandlestickData) => {
+          (seriesRef.current as ISeriesApi<"Line">).update({
+            time: candle.time,
+            value: candle.close,
+          });
+        });
+      }
+
+      // Update progress
+      setBuildProgress(message.batch.progress.percent);
+
+      // Fit content every few batches for smooth scrolling
+      if (message.batch.batch % 5 === 0 && chartRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+
+      return;
+    }
+
+    // Handle progressive build completion
+    if (message.type === 'candles:complete') {
+      if (message.buildJob !== currentBuildJobRef.current) {
+        return;
+      }
+
+      console.log(`✅ Progressive build complete: ${message.buildJob}`);
+      setIsBuilding(false);
+      setBuildProgress(100);
+      currentBuildJobRef.current = null;
+
+      // Final fit
+      if (chartRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+
+      return;
+    }
+
+    // Handle pre-calculated candle updates from backend (real-time updates)
     if (message.type === 'candles:update') {
       console.log("📊 Candle update received:", message.candles?.length, "candles");
 
@@ -320,7 +390,24 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
       try {
         const response = await fetchBackendChartData(tokenAddress, timeframe);
 
-        if (!response || !response.candles || response.candles.length === 0) {
+        if (!response) {
+          console.log("No response from backend");
+          setLoading(false);
+          return;
+        }
+
+        // Handle progressive build status
+        if (response.status === 'building') {
+          console.log(`🏗️  Progressive build started: ${response.buildJob}`);
+          currentBuildJobRef.current = response.buildJob;
+          setIsBuilding(true);
+          setBuildProgress(0);
+          setLoading(false);
+          return; // Chart will be populated via WebSocket batches
+        }
+
+        // Handle complete/cached candles
+        if (!response.candles || response.candles.length === 0) {
           console.log("No candle data available");
           setLoading(false);
           return;
@@ -739,6 +826,19 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
             <div className="text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-2"></div>
               <div className="text-gray-400">Loading chart data...</div>
+            </div>
+          </div>
+        )}
+        {isBuilding && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 glass-strong px-6 py-3 rounded-lg z-20">
+            <div className="text-center">
+              <div className="text-sm font-medium mb-2 gradient-text">Building chart... {buildProgress}%</div>
+              <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                  style={{ width: `${buildProgress}%` }}
+                />
+              </div>
             </div>
           </div>
         )}

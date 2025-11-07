@@ -690,18 +690,84 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     console.log(`   Found ${candles.length} pre-calculated ${timeframe} candles in database`);
 
     if (candles.length === 0) {
-      // Build and save candles
+      // No cached candles - start progressive build
       const intervalSeconds = timeframeMap[timeframe] || 3600;
-      console.log(`   Building ${timeframe} candles (${intervalSeconds}s intervals) from ${swaps.length} swaps...`);
-      const buildStartTime = Date.now();
-      candles = db.buildAndSaveCandles(tokenAddress.toLowerCase(), timeframe, intervalSeconds);
-      const buildTime = Date.now() - buildStartTime;
-      console.log(`   ✅ Built and saved ${candles.length} candles in ${buildTime}ms`);
+      const buildJob = `${tokenAddress.toLowerCase()}-${timeframe}-${Date.now()}`;
 
-      if (candles.length > 0) {
-        console.log(`   First candle: Time ${candles[0].time || candles[0].timestamp} (${new Date((candles[0].time || candles[0].timestamp) * 1000).toISOString()}), Close: $${candles[0].close.toFixed(8)}`);
-        console.log(`   Last candle: Time ${candles[candles.length - 1].time || candles[candles.length - 1].timestamp} (${new Date((candles[candles.length - 1].time || candles[candles.length - 1].timestamp) * 1000).toISOString()}), Close: $${candles[candles.length - 1].close.toFixed(8)}`);
-      }
+      console.log(`   🏗️  Starting progressive build: ${buildJob}`);
+
+      // Get transactions immediately while candles build
+      const rawTransactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
+      const transactions = rawTransactions.map(tx => ({
+        txHash: tx.tx_hash,
+        pairAddress: tx.pair_address,
+        tokenAddress: tx.token_address,
+        blockNumber: tx.block_number,
+        timestamp: tx.timestamp,
+        price: tx.price,
+        volume: tx.volume,
+        type: tx.type,
+        tokenAmount: tx.token_amount,
+        wopnAmount: tx.wopn_amount
+      }));
+
+      const token = db.getToken(tokenAddress.toLowerCase());
+      const tokenMetadata = token ? {
+        name: token.name,
+        symbol: token.symbol,
+        decimals: token.decimals
+      } : {
+        name: 'Unknown',
+        symbol: 'UNKNOWN',
+        decimals: 18
+      };
+
+      // Start progressive build in background (non-blocking)
+      setImmediate(() => {
+        db.buildCandlesProgressively(tokenAddress.toLowerCase(), timeframe, intervalSeconds, (batchData) => {
+          // Broadcast each batch to all connected WebSocket clients
+          const message = JSON.stringify({
+            type: 'candles:batch',
+            buildJob,
+            tokenAddress: tokenAddress.toLowerCase(),
+            timeframe,
+            batch: batchData
+          });
+
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) {
+              client.send(message);
+            }
+          });
+
+          console.log(`   📦 Batch ${batchData.batch}: ${batchData.candles.length} candles (${batchData.progress.percent}% complete)`);
+        });
+
+        // Send completion message
+        const completeMessage = JSON.stringify({
+          type: 'candles:complete',
+          buildJob,
+          tokenAddress: tokenAddress.toLowerCase(),
+          timeframe
+        });
+
+        wss.clients.forEach((client) => {
+          if (client.readyState === 1) {
+            client.send(completeMessage);
+          }
+        });
+
+        console.log(`   ✅ Progressive build complete: ${buildJob}`);
+      });
+
+      // Return immediately with building status
+      return res.json({
+        status: 'building',
+        buildJob,
+        candles: [],
+        transactions,
+        tokenMetadata
+      });
     } else {
       const cacheTime = Date.now() - candleStartTime;
       console.log(`   ✅ Using ${candles.length} cached ${timeframe} candles (loaded in ${cacheTime}ms)`);
@@ -753,6 +819,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     };
 
     res.json({
+      status: 'complete',
       candles, // Already sorted oldest to newest with 'time' field
       transactions, // Mapped to camelCase for frontend
       tokenMetadata // Include token name, symbol, decimals
