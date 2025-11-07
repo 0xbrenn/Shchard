@@ -191,7 +191,7 @@ const candleQueries = {
   getByTokenAndTimeframe: db.prepare(`
     SELECT * FROM candles
     WHERE token_address = ? AND timeframe = ?
-    ORDER BY timestamp ASC
+    ORDER BY timestamp DESC
     LIMIT ?
   `),
 
@@ -392,7 +392,9 @@ function buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandl
 }
 
 function getCandles(tokenAddress, timeframe, limit = 1000) {
-  return candleQueries.getByTokenAndTimeframe.all(tokenAddress, timeframe, limit);
+  const candles = candleQueries.getByTokenAndTimeframe.all(tokenAddress, timeframe, limit);
+  // Query returns newest first (DESC), reverse to get chronological order for frontend
+  return candles.reverse();
 }
 
 function getAllTokens() {
