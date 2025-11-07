@@ -703,7 +703,21 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     }));
 
     // Get recent transactions (last 50, newest first)
-    const transactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
+    const rawTransactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
+
+    // Map database fields (snake_case) to frontend fields (camelCase)
+    const transactions = rawTransactions.map(tx => ({
+      txHash: tx.tx_hash,
+      pairAddress: tx.pair_address,
+      tokenAddress: tx.token_address,
+      blockNumber: tx.block_number,
+      timestamp: tx.timestamp,
+      price: tx.price,
+      volume: tx.volume,
+      type: tx.type,
+      tokenAmount: tx.token_amount,
+      wopnAmount: tx.wopn_amount
+    }));
 
     // Get token metadata from database (indexer already saved it)
     const token = db.getToken(tokenAddress.toLowerCase());
@@ -719,7 +733,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
 
     res.json({
       candles, // Already sorted oldest to newest with 'time' field
-      transactions, // Already newest first from DB
+      transactions, // Mapped to camelCase for frontend
       tokenMetadata // Include token name, symbol, decimals
     });
 
