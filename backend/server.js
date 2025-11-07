@@ -634,18 +634,12 @@ function generateMockTransactions(count) {
 app.get('/api/chart/:tokenAddress', async (req, res) => {
   try {
     const { tokenAddress } = req.params;
-    const { timeframe = '1H' } = req.query;
+    const { timeframe = '5M' } = req.query;
 
     const timeframeMap = {
       '1M': 60,
       '5M': 5 * 60,
-      '15M': 15 * 60,
-      '30M': 30 * 60,
-      '1H': 60 * 60,
-      '2H': 2 * 60 * 60,
-      '4H': 4 * 60 * 60,
-      '12H': 12 * 60 * 60,
-      '1D': 24 * 60 * 60
+      '15M': 15 * 60
     };
 
     // Check if we have data in database
