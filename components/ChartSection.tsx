@@ -45,98 +45,77 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
     return price.toFixed(decimals);
   };
 
-  // Handle live swap updates from backend
-  const handleLiveSwap = (swapData: SwapUpdate) => {
-    const swap = swapData.data;
-    console.log("💹 Live swap received:", swap);
-    console.log("   Current chart type:", chartType);
-    console.log("   Series exists:", !!seriesRef.current);
-    console.log("   Data length:", currentDataRef.current.length);
+  // Handle live updates from backend (swaps and pre-calculated candle updates)
+  const handleLiveSwap = (message: any) => {
+    // Handle pre-calculated candle updates from backend (preferred method)
+    if (message.type === 'candles:update') {
+      console.log("📊 Candle update received:", message.candles?.length, "candles");
 
-    setCurrentPrice(swap.price);
-    setLiveSwapIndicator(swap);
+      if (!seriesRef.current || currentDataRef.current.length === 0) {
+        console.log("⚠️ Chart not ready for candle updates");
+        return;
+      }
 
-    // Clear indicator after 3 seconds
-    setTimeout(() => {
-      setLiveSwapIndicator(null);
-    }, 3000);
+      // Find the candle for our current timeframe
+      const candleUpdate = message.candles.find((c: any) => c.timeframe === timeframe);
+      if (!candleUpdate) {
+        return; // Not for our timeframe
+      }
 
-    // Update chart with new price
-    if (!seriesRef.current || currentDataRef.current.length === 0) {
-      console.log("⚠️ Chart not ready for updates");
+      if (chartType === "candlestick") {
+        const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
+        const lastCandleTime = lastCandle.time as number;
+
+        if (candleUpdate.time > lastCandleTime) {
+          // New candle - append it
+          const newCandle: CandlestickData = {
+            time: candleUpdate.time as UTCTimestamp,
+            open: candleUpdate.open,
+            high: candleUpdate.high,
+            low: candleUpdate.low,
+            close: candleUpdate.close,
+          };
+          currentDataRef.current.push(newCandle);
+          (seriesRef.current as ISeriesApi<"Candlestick">).update(newCandle);
+          console.log(`✅ New candle added at ${candleUpdate.time}`);
+        } else if (candleUpdate.time === lastCandleTime) {
+          // Update existing candle
+          const updatedCandle: CandlestickData = {
+            time: candleUpdate.time as UTCTimestamp,
+            open: candleUpdate.open,
+            high: candleUpdate.high,
+            low: candleUpdate.low,
+            close: candleUpdate.close,
+          };
+          currentDataRef.current[currentDataRef.current.length - 1] = updatedCandle;
+          (seriesRef.current as ISeriesApi<"Candlestick">).update(updatedCandle);
+          console.log(`✅ Candle updated at ${candleUpdate.time}`);
+        }
+      } else if (chartType === "line") {
+        const newPoint: LineData = {
+          time: candleUpdate.time as UTCTimestamp,
+          value: candleUpdate.close,
+        };
+        (seriesRef.current as ISeriesApi<"Line">).update(newPoint);
+      }
+
+      setCurrentPrice(candleUpdate.close);
       return;
     }
 
-    const candleInterval = getTimeframeSeconds(timeframe);
-    const swapCandleTime = Math.floor(swap.timestamp / candleInterval) * candleInterval;
+    // Handle raw swap updates (for transaction indicator)
+    if (message.type === 'swap') {
+      const swap = message.data;
+      setCurrentPrice(swap.price);
+      setLiveSwapIndicator(swap);
 
-    if (chartType === "candlestick") {
-      const lastCandle = currentDataRef.current[currentDataRef.current.length - 1];
-      const lastCandleTime = lastCandle.time as number;
+      // Clear indicator after 3 seconds
+      setTimeout(() => {
+        setLiveSwapIndicator(null);
+      }, 3000);
 
-      console.log(`📊 Candlestick update: swap at ${swap.timestamp} (${new Date(swap.timestamp * 1000).toISOString()})`);
-      console.log(`   Swap candle time: ${swapCandleTime}, Last candle time: ${lastCandleTime}`);
-      console.log(`   Swap price: ${swap.price}`);
-
-      if (swapCandleTime > lastCandleTime) {
-        // This swap belongs to a NEW candle period
-        console.log("🆕 Creating new candle");
-
-        // Fill any gaps between last candle and this new candle
-        let fillTime = lastCandleTime + candleInterval;
-        while (fillTime < swapCandleTime) {
-          const gapCandle: CandlestickData = {
-            time: fillTime as UTCTimestamp,
-            open: lastCandle.close,
-            high: lastCandle.close,
-            low: lastCandle.close,
-            close: lastCandle.close,
-          };
-          currentDataRef.current.push(gapCandle);
-          (seriesRef.current as ISeriesApi<"Candlestick">).update(gapCandle);
-          console.log(`  📋 Filled gap candle at ${fillTime}`);
-          fillTime += candleInterval;
-        }
-
-        // Now create the candle with the actual swap
-        const newCandle: CandlestickData = {
-          time: swapCandleTime as UTCTimestamp,
-          open: swap.price,
-          high: swap.price,
-          low: swap.price,
-          close: swap.price,
-        };
-        currentDataRef.current.push(newCandle);
-        (seriesRef.current as ISeriesApi<"Candlestick">).update(newCandle);
-        console.log(`✅ New candle created at ${swapCandleTime} with price ${swap.price}`);
-      } else if (swapCandleTime === lastCandleTime) {
-        // This swap belongs to the CURRENT candle period - update it
-        console.log("📝 Updating current candle");
-        const updatedCandle: CandlestickData = {
-          time: lastCandle.time,
-          open: lastCandle.open,
-          high: Math.max(lastCandle.high, swap.price),
-          low: Math.min(lastCandle.low, swap.price),
-          close: swap.price,
-        };
-        currentDataRef.current[currentDataRef.current.length - 1] = updatedCandle;
-        (seriesRef.current as ISeriesApi<"Candlestick">).update(updatedCandle);
-        console.log(`✅ Candle updated: O:${updatedCandle.open} H:${updatedCandle.high} L:${updatedCandle.low} C:${updatedCandle.close}`);
-      } else {
-        // This swap is for an old candle (shouldn't happen in real-time)
-        console.log("⚠️ Swap belongs to old candle, ignoring");
-      }
-    } else if (chartType === "line") {
-      // Update line chart
-      console.log(`📈 Line chart update: adding point at ${swapCandleTime} with value ${swap.price}`);
-
-      const newPoint: LineData = {
-        time: swapCandleTime as UTCTimestamp,
-        value: swap.price,
-      };
-
-      (seriesRef.current as ISeriesApi<"Line">).update(newPoint);
-      console.log(`✅ Line chart updated with price ${swap.price}`);
+      // Note: Chart updates now handled by candles:update messages
+      // This keeps swap handling simple and candle updates accurate
     }
   };
 

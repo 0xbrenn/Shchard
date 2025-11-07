@@ -36,10 +36,16 @@ const indexer = new LogIndexer({
   opnPrice: OPN_PRICE,
   deploymentBlockOffset: 100000, // Start indexing from 100k blocks ago (when DEX was deployed)
   onNewSwap: (swap) => {
+    console.log(`📡 New swap: ${swap.tokenAddress} - $${swap.price.toFixed(8)}`);
+
+    // Update all candles (1M, 5M, 15M, 1H, 4H, 1D) in real-time
+    const updatedCandles = db.updateCandlesWithSwap(swap);
+    console.log(`   ✅ Updated ${updatedCandles.length} candles in database`);
+
     // Broadcast new swap to all connected WebSocket clients
-    console.log(`📡 Broadcasting swap: ${swap.tokenAddress} - $${swap.price.toFixed(8)}`);
     wss.clients.forEach((client) => {
       if (client.readyState === 1) { // OPEN
+        // Send swap update
         client.send(JSON.stringify({
           type: 'swap',
           tokenAddress: swap.tokenAddress,
@@ -53,6 +59,21 @@ const indexer = new LogIndexer({
             tokenAmount: swap.tokenAmount,
             wopnAmount: swap.wopnAmount
           }
+        }));
+
+        // Send candle updates (so charts update in real-time)
+        client.send(JSON.stringify({
+          type: 'candles:update',
+          tokenAddress: swap.tokenAddress,
+          candles: updatedCandles.map(c => ({
+            timeframe: c.timeframe,
+            time: c.timestamp,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume
+          }))
         }));
       }
     });

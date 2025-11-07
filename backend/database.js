@@ -427,6 +427,78 @@ function setLastIndexedBlockGlobal(blockNumber) {
   return indexerStateQueries.set.run('last_indexed_block', blockNumber);
 }
 
+// Update candles in real-time when a new swap arrives
+function updateCandlesWithSwap(swap) {
+  const timeframeMap = {
+    '1M': 60,
+    '5M': 5 * 60,
+    '15M': 15 * 60,
+    '30M': 30 * 60,
+    '1H': 60 * 60,
+    '2H': 2 * 60 * 60,
+    '4H': 4 * 60 * 60,
+    '12H': 12 * 60 * 60,
+    '1D': 24 * 60 * 60
+  };
+
+  const updatedCandles = [];
+  const tokenAddress = swap.tokenAddress.toLowerCase();
+
+  // Update candles for all timeframes
+  for (const [timeframe, intervalSeconds] of Object.entries(timeframeMap)) {
+    // Calculate which candle this swap belongs to
+    const candleTimestamp = Math.floor(swap.timestamp / intervalSeconds) * intervalSeconds;
+
+    // Get existing candle or create new one
+    const existingCandle = db.prepare(`
+      SELECT * FROM candles
+      WHERE token_address = ? AND timeframe = ? AND timestamp = ?
+    `).get(tokenAddress, timeframe, candleTimestamp);
+
+    let candle;
+    if (existingCandle) {
+      // Update existing candle
+      candle = {
+        open: existingCandle.open,
+        high: Math.max(existingCandle.high, swap.price),
+        low: Math.min(existingCandle.low, swap.price),
+        close: swap.price, // Most recent price
+        volume: existingCandle.volume + swap.volume
+      };
+    } else {
+      // Create new candle
+      candle = {
+        open: swap.price,
+        high: swap.price,
+        low: swap.price,
+        close: swap.price,
+        volume: swap.volume
+      };
+    }
+
+    // Upsert candle to database
+    candleQueries.upsert.run(
+      tokenAddress,
+      timeframe,
+      candleTimestamp,
+      candle.open,
+      candle.high,
+      candle.low,
+      candle.close,
+      candle.volume
+    );
+
+    // Add to updated list for broadcasting
+    updatedCandles.push({
+      timeframe,
+      timestamp: candleTimestamp,
+      ...candle
+    });
+  }
+
+  return updatedCandles;
+}
+
 export {
   db,
   initializeDatabase,
@@ -448,6 +520,7 @@ export {
   // Candle functions
   buildAndSaveCandles,
   getCandles,
+  updateCandlesWithSwap,
 
   // Indexer state functions
   getLastIndexedBlockGlobal,

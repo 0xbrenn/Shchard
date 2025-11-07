@@ -158,10 +158,10 @@ export class BackendWebSocket {
 
       this.ws.onmessage = (event) => {
         try {
-          const data: SwapUpdate = JSON.parse(event.data);
+          const data: any = JSON.parse(event.data);
 
-          if (data.type === 'swap') {
-            // Notify all subscribers for this token
+          // Handle all message types (swap, candles:update, etc.)
+          if (data.tokenAddress) {
             const callback = this.subscribers.get(data.tokenAddress.toLowerCase());
             if (callback) {
               callback(data);
