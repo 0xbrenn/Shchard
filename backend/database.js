@@ -295,18 +295,15 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
 
   console.log(`      ✓ Built ${Object.keys(swapCandles).length} candles with swap data`);
 
-  // OPTIMIZATION: Only fill gaps for RECENT data (last 7 days max)
-  // Don't create thousands of empty candles from months ago!
+  // Build candles from first swap to current time for complete historical data
   const now = Math.floor(Date.now() / 1000);
-  const maxHistorySeconds = 7 * 24 * 60 * 60; // 7 days
 
   // Note: swaps are ordered DESC (newest first), so swaps[swaps.length-1] is oldest
   const firstTimestamp = swaps[swaps.length - 1].timestamp; // Oldest swap
   const newestTimestamp = swaps[0].timestamp; // Newest swap
 
-  // Only go back 7 days OR to first swap, whichever is more recent
-  const effectiveStartTime = Math.max(firstTimestamp, now - maxHistorySeconds);
-  const startTime = Math.floor(effectiveStartTime / intervalSeconds) * intervalSeconds;
+  // Start from the very first swap
+  const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
 
   // End at current time so charts always show up-to-date state
   const endTime = Math.floor(now / intervalSeconds) * intervalSeconds;
@@ -316,10 +313,10 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
 
   console.log(`      Time range: ${timeRangeDays.toFixed(1)} days (${maxCandles} candles max)`);
 
-  // Safety check: Don't create more than 10,000 candles
-  if (maxCandles > 10000) {
-    console.log(`      ⚠️  Too many candles (${maxCandles}), limiting to recent 5000`);
-    const limitedStartTime = endTime - (5000 * intervalSeconds);
+  // Safety check: Don't create more than 100,000 candles
+  if (maxCandles > 100000) {
+    console.log(`      ⚠️  Too many candles (${maxCandles}), limiting to recent 50,000`);
+    const limitedStartTime = endTime - (50000 * intervalSeconds);
     return buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandles, limitedStartTime, endTime);
   }
 
@@ -459,12 +456,10 @@ function buildCandlesProgressively(tokenAddress, timeframe, intervalSeconds, onB
     }
   }
 
-  // Calculate time range
+  // Calculate time range - build from first swap to now for complete history
   const now = Math.floor(Date.now() / 1000);
-  const maxHistorySeconds = 7 * 24 * 60 * 60;
   const firstTimestamp = swaps[swaps.length - 1].timestamp;
-  const effectiveStartTime = Math.max(firstTimestamp, now - maxHistorySeconds);
-  const startTime = Math.floor(effectiveStartTime / intervalSeconds) * intervalSeconds;
+  const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
   const endTime = Math.floor(now / intervalSeconds) * intervalSeconds;
 
   const totalCandles = Math.ceil((endTime - startTime) / intervalSeconds);
