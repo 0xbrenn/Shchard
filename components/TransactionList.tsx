@@ -60,8 +60,9 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
       setLoading(true);
       try {
         const response = await fetchChartData(tokenAddress, "1H");
-        // Backend returns transactions newest first, so no need to reverse
-        setTransactions(response.transactions || []);
+        // Backend returns transactions newest first, filter out any undefined
+        const validTransactions = (response.transactions || []).filter((tx: any) => tx && tx.txHash);
+        setTransactions(validTransactions);
         // Set token symbol from metadata
         if (response.tokenMetadata) {
           setTokenSymbol(response.tokenMetadata.symbol);
@@ -80,15 +81,26 @@ export default function TransactionList({ tokenAddress }: TransactionListProps) 
   useEffect(() => {
     if (!tokenAddress) return;
 
-    // Initialize WebSocket connection to backend
+    // Get singleton WebSocket instance
     if (!wsRef.current) {
-      wsRef.current = new BackendWebSocket();
+      wsRef.current = BackendWebSocket.getInstance();
     }
 
-    const handleNewSwap = (swapUpdate: SwapUpdate) => {
-      console.log("📋 New transaction received:", swapUpdate);
+    const handleNewSwap = (message: any) => {
+      // Only handle swap messages (ignore candles:batch, candles:update, etc.)
+      if (message.type !== 'swap') {
+        return;
+      }
 
-      const swap = swapUpdate.data;
+      console.log("📋 New transaction received:", message);
+
+      const swap = message.data;
+
+      // Only add if valid swap with txHash
+      if (!swap || !swap.txHash) {
+        console.warn("⚠️  Received invalid swap:", swap);
+        return;
+      }
 
       // Add to top of list (newest first)
       setTransactions(prev => [swap, ...prev.slice(0, 49)]);
