@@ -793,15 +793,19 @@ app.post('/api/index/:tokenAddress', async (req, res) => {
 });
 
 // WebSocket connection handler (simplified - indexer handles all events)
-wss.on('connection', (ws) => {
-  console.log('👤 New WebSocket client connected (total clients:', wss.clients.size + ')');
+wss.on('connection', (ws, req) => {
+  const clientIP = req.socket.remoteAddress;
+  const clientID = Math.random().toString(36).substring(7);
+
+  console.log(`👤 New WebSocket client connected [${clientID}] from ${clientIP}`);
+  console.log(`   Total clients: ${wss.clients.size}`);
 
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
 
       if (data.type === 'subscribe' && data.tokenAddress) {
-        console.log(`📡 Client subscribing to ${data.tokenAddress}`);
+        console.log(`📡 Client [${clientID}] subscribing to ${data.tokenAddress}`);
 
         // Check if we have data for this token
         const swaps = db.getTokenSwaps(data.tokenAddress.toLowerCase(), 1);
@@ -813,12 +817,16 @@ wss.on('connection', (ws) => {
         }));
       }
     } catch (error) {
-      console.error('WebSocket message error:', error);
+      console.error(`WebSocket message error from client [${clientID}]:`, error);
     }
   });
 
   ws.on('close', () => {
-    console.log('👋 Client disconnected (remaining clients:', wss.clients.size - 1 + ')');
+    console.log(`👋 Client [${clientID}] disconnected (remaining clients: ${wss.clients.size})`);
+  });
+
+  ws.on('error', (error) => {
+    console.error(`❌ WebSocket error from client [${clientID}]:`, error.message);
   });
 });
 
@@ -845,7 +853,18 @@ server.listen(PORT, async () => {
 
   // Heartbeat every 30 seconds to show we're alive
   setInterval(() => {
-    const status = wsProvider ? '🟢 CONNECTED' : '🔴 DISCONNECTED';
-    console.log(`💓 Heartbeat - WebSocket: ${status}, Subscribed: ${subscribedTokens.size} tokens, Clients: ${wss.clients.size}`);
+    const indexerStatus = indexer.isRealtime ? '🟢 REAL-TIME' : '🟠 HISTORICAL';
+    const allTokens = db.getAllTokens();
+    const lastBlock = db.getLastIndexedBlockGlobal();
+
+    console.log(`💓 Heartbeat - Indexer: ${indexerStatus}, Block: ${lastBlock || 'N/A'}, Tokens: ${allTokens.length}, Clients: ${wss.clients.size}`);
+
+    // Log details about connected clients
+    if (wss.clients.size > 0) {
+      const clientDetails = Array.from(wss.clients).map((client, i) => {
+        return `Client ${i + 1}: ${client.readyState === 1 ? 'OPEN' : client.readyState === 0 ? 'CONNECTING' : client.readyState === 2 ? 'CLOSING' : 'CLOSED'}`;
+      });
+      console.log(`   📡 Clients: ${clientDetails.join(', ')}`);
+    }
   }, 30000);
 });

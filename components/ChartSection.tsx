@@ -159,18 +159,20 @@ export default function ChartSection({ tokenAddress }: ChartSectionProps) {
   useEffect(() => {
     if (!tokenAddress) return;
 
-    // Initialize WebSocket connection to backend
+    // Get singleton WebSocket instance (shared across all components)
     if (!wsRef.current) {
-      wsRef.current = new BackendWebSocket();
+      wsRef.current = BackendWebSocket.getInstance();
+      console.log("🔌 Got WebSocket singleton instance");
     }
 
     // Subscribe to token updates
-    console.log("🔌 Subscribing to live swaps via backend...");
+    console.log(`🔌 Subscribing to live swaps for ${tokenAddress}`);
     wsRef.current.subscribe(tokenAddress, handleLiveSwap);
     setIsLive(true);
 
     return () => {
       if (wsRef.current && tokenAddress) {
+        console.log(`🔌 Cleanup: Unsubscribing from ${tokenAddress}`);
         wsRef.current.unsubscribe(tokenAddress);
       }
       setIsLive(false);

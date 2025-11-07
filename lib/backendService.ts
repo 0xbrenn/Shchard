@@ -110,27 +110,50 @@ export async function indexToken(tokenAddress: string): Promise<boolean> {
 }
 
 /**
- * WebSocket connection for real-time updates
+ * WebSocket connection for real-time updates (Singleton)
  */
 export class BackendWebSocket {
+  private static instance: BackendWebSocket | null = null;
   private ws: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private subscribers: Map<string, (data: SwapUpdate) => void> = new Map();
 
-  constructor() {
+  private constructor() {
+    console.log('🔌 Creating new BackendWebSocket singleton instance');
     this.connect();
+  }
+
+  /**
+   * Get singleton instance
+   */
+  static getInstance(): BackendWebSocket {
+    if (!BackendWebSocket.instance) {
+      BackendWebSocket.instance = new BackendWebSocket();
+    }
+    return BackendWebSocket.instance;
   }
 
   private connect() {
     try {
+      console.log(`🔌 Connecting to backend WebSocket at ${WS_URL}`);
       this.ws = new WebSocket(WS_URL);
 
       this.ws.onopen = () => {
         console.log('✅ Connected to backend WebSocket');
+        console.log(`   Active subscribers: ${this.subscribers.size}`);
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+
+        // Re-subscribe all active subscribers after reconnection
+        this.subscribers.forEach((callback, tokenAddress) => {
+          console.log(`   🔄 Re-subscribing to ${tokenAddress}`);
+          this.ws?.send(JSON.stringify({
+            type: 'subscribe',
+            tokenAddress
+          }));
+        });
       };
 
       this.ws.onmessage = (event) => {
@@ -177,7 +200,10 @@ export class BackendWebSocket {
    */
   subscribe(tokenAddress: string, callback: (data: SwapUpdate) => void) {
     const address = tokenAddress.toLowerCase();
+    const alreadySubscribed = this.subscribers.has(address);
+
     this.subscribers.set(address, callback);
+    console.log(`📡 ${alreadySubscribed ? 'Updating' : 'Adding'} subscription for ${address} (total: ${this.subscribers.size})`);
 
     // Send subscribe message to backend
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -185,6 +211,8 @@ export class BackendWebSocket {
         type: 'subscribe',
         tokenAddress: address
       }));
+    } else {
+      console.log(`   ⚠️  WebSocket not open (state: ${this.ws?.readyState}), will subscribe when connected`);
     }
   }
 
@@ -192,7 +220,14 @@ export class BackendWebSocket {
    * Unsubscribe from token updates
    */
   unsubscribe(tokenAddress: string) {
-    this.subscribers.delete(tokenAddress.toLowerCase());
+    const address = tokenAddress.toLowerCase();
+    const wasSubscribed = this.subscribers.has(address);
+
+    this.subscribers.delete(address);
+
+    if (wasSubscribed) {
+      console.log(`📴 Unsubscribed from ${address} (remaining: ${this.subscribers.size})`);
+    }
   }
 
   /**
