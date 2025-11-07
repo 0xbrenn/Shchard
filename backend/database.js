@@ -261,6 +261,8 @@ function upsertPair(pair) {
 
 // Build candles from swaps
 function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
+  const startBuildTime = Date.now();
+
   const swaps = swapQueries.getByToken.all(tokenAddress, 10000); // Get more swaps for accurate candles
   console.log(`      🏗️  Building candles: ${swaps.length} swaps, ${intervalSeconds}s interval`);
 
@@ -291,24 +293,57 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
     }
   }
 
-  // Now fill in gaps with zero-volume candles using previous close
+  console.log(`      ✓ Built ${Object.keys(swapCandles).length} candles with swap data`);
+
+  // OPTIMIZATION: Only fill gaps for RECENT data (last 7 days max)
+  // Don't create thousands of empty candles from months ago!
+  const now = Math.floor(Date.now() / 1000);
+  const maxHistorySeconds = 7 * 24 * 60 * 60; // 7 days
+
   // Note: swaps are ordered DESC (newest first), so swaps[swaps.length-1] is oldest
   const firstTimestamp = swaps[swaps.length - 1].timestamp; // Oldest swap
-  const now = Math.floor(Date.now() / 1000);
-  const lastTimestamp = Math.max(swaps[0].timestamp, now - (intervalSeconds * 100)); // Newest swap
-  const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
-  const endTime = Math.floor(lastTimestamp / intervalSeconds) * intervalSeconds;
+  const newestTimestamp = swaps[0].timestamp; // Newest swap
 
-  let previousClose = swaps[swaps.length - 1].price; // Start with oldest price
+  // Only go back 7 days OR to first swap, whichever is more recent
+  const effectiveStartTime = Math.max(firstTimestamp, now - maxHistorySeconds);
+  const startTime = Math.floor(effectiveStartTime / intervalSeconds) * intervalSeconds;
+
+  // End at the most recent candle with data + a few hours ahead
+  const endTime = Math.floor(Math.max(newestTimestamp, now - (intervalSeconds * 10)) / intervalSeconds) * intervalSeconds;
+
+  const timeRangeDays = (endTime - startTime) / (24 * 60 * 60);
+  const maxCandles = Math.ceil((endTime - startTime) / intervalSeconds);
+
+  console.log(`      Time range: ${timeRangeDays.toFixed(1)} days (${maxCandles} candles max)`);
+
+  // Safety check: Don't create more than 10,000 candles
+  if (maxCandles > 10000) {
+    console.log(`      ⚠️  Too many candles (${maxCandles}), limiting to recent 5000`);
+    const limitedStartTime = endTime - (5000 * intervalSeconds);
+    return buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandles, limitedStartTime, endTime);
+  }
+
+  return buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandles, startTime, endTime);
+}
+
+// Helper function to build candles in a specific time range
+function buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandles, startTime, endTime) {
   const allCandles = {};
+  let previousClose = null;
+
+  // Find the first price to use for filling
+  const sortedTimes = Object.keys(swapCandles).map(t => parseInt(t)).sort((a, b) => a - b);
+  if (sortedTimes.length > 0) {
+    previousClose = swapCandles[sortedTimes[0]].open;
+  }
 
   for (let time = startTime; time <= endTime; time += intervalSeconds) {
     if (swapCandles[time]) {
       // Use actual swap candle
       allCandles[time] = swapCandles[time];
       previousClose = swapCandles[time].close;
-    } else {
-      // Fill gap with zero-volume candle
+    } else if (previousClose !== null) {
+      // Fill gap with zero-volume candle (only if we have a previous price)
       allCandles[time] = {
         open: previousClose,
         high: previousClose,
@@ -319,7 +354,10 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
     }
   }
 
-  // Save candles to database
+  console.log(`      ✓ Created ${Object.keys(allCandles).length} total candles (includes fills)`);
+
+  // Save candles to database in a transaction
+  const insertStart = Date.now();
   const insertCandles = db.transaction((candlesList) => {
     for (const [timestamp, candle] of Object.entries(candlesList)) {
       candleQueries.upsert.run(
@@ -336,13 +374,14 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   });
 
   insertCandles(allCandles);
+  const insertTime = Date.now() - insertStart;
 
   const candleArray = Object.entries(allCandles).map(([timestamp, candle]) => ({
     time: parseInt(timestamp),
     ...candle
   })).sort((a, b) => a.time - b.time);
 
-  console.log(`      ✅ Saved ${candleArray.length} candles to database`);
+  console.log(`      ✅ Saved ${candleArray.length} candles in ${insertTime}ms`);
 
   if (candleArray.length > 0) {
     console.log(`      Time range: ${new Date(candleArray[0].time * 1000).toISOString()} to ${new Date(candleArray[candleArray.length - 1].time * 1000).toISOString()}`);
