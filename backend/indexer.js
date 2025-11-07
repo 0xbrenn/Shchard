@@ -598,6 +598,7 @@ export class LogIndexer {
     const volumeUSD = wopnAmount * this.opnPrice;
 
     return {
+      pairAddress: swap.pairAddress,
       tokenAddress,
       blockNumber: swap.blockNumber,
       timestamp: swap.timestamp,
