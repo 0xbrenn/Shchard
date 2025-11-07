@@ -352,6 +352,59 @@ export class LogIndexer {
    */
   async processSwaps(logs, isRealtime = false) {
     console.log(`   Processing ${logs.length} Swap events...`);
+    const startTime = Date.now();
+
+    // OPTIMIZATION: Batch fetch all unique block timestamps upfront
+    const uniqueBlocks = [...new Set(logs.map(log => log.blockNumber))];
+    const uncachedBlocks = uniqueBlocks.filter(block => !this.blockTimestampCache.has(block));
+
+    if (uncachedBlocks.length > 0) {
+      console.log(`      ⏱️  Pre-fetching timestamps for ${uncachedBlocks.length} unique blocks...`);
+      const fetchStart = Date.now();
+
+      // Fetch blocks in parallel (limited to 10 concurrent requests)
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < uncachedBlocks.length; i += BATCH_SIZE) {
+        const batch = uncachedBlocks.slice(i, i + BATCH_SIZE);
+        const blockPromises = batch.map(blockNum =>
+          this.provider.getBlock(blockNum)
+            .then(block => {
+              if (block) {
+                this.blockTimestampCache.set(blockNum, block.timestamp);
+              }
+              return block;
+            })
+            .catch(err => {
+              console.error(`      ✗ Failed to fetch block ${blockNum}:`, err.message);
+              return null;
+            })
+        );
+
+        await Promise.all(blockPromises);
+      }
+
+      const fetchTime = Date.now() - fetchStart;
+      console.log(`      ✅ Fetched ${uncachedBlocks.length} block timestamps in ${fetchTime}ms (${(fetchTime / uncachedBlocks.length).toFixed(1)}ms/block)`);
+    }
+
+    // OPTIMIZATION: Pre-fetch pair info for unknown pairs
+    const uniquePairs = [...new Set(logs.map(log => log.address.toLowerCase()))];
+    const unknownPairs = uniquePairs.filter(addr => !this.pairCache.has(addr));
+
+    if (unknownPairs.length > 0) {
+      console.log(`      🔍 Pre-fetching info for ${unknownPairs.length} unknown pairs...`);
+      const pairStart = Date.now();
+
+      for (const pairAddress of unknownPairs) {
+        const pairInfo = await this.getPairInfo(pairAddress);
+        if (pairInfo) {
+          this.pairCache.set(pairAddress, pairInfo);
+        }
+      }
+
+      const pairTime = Date.now() - pairStart;
+      console.log(`      ✅ Fetched ${unknownPairs.length} pair infos in ${pairTime}ms`);
+    }
 
     const swaps = [];
 
@@ -364,23 +417,16 @@ export class LogIndexer {
 
         const pairAddress = log.address.toLowerCase();
 
-        // Get pair info
-        let pairInfo = this.pairCache.get(pairAddress);
+        // Get pair info (should be cached now)
+        const pairInfo = this.pairCache.get(pairAddress);
 
         if (!pairInfo) {
-          // Unknown pair, fetch metadata
-          pairInfo = await this.getPairInfo(pairAddress);
-
-          if (!pairInfo) {
-            // Not a WOPN pair, skip
-            continue;
-          }
-
-          this.pairCache.set(pairAddress, pairInfo);
+          // Not a WOPN pair, skip
+          continue;
         }
 
-        // Get block timestamp
-        const timestamp = await this.getBlockTimestamp(log.blockNumber);
+        // Get block timestamp (should be cached now)
+        const timestamp = this.blockTimestampCache.get(log.blockNumber) || Math.floor(Date.now() / 1000);
 
         // Decode amounts
         const amount0In = decoded.args.amount0In;
@@ -416,9 +462,15 @@ export class LogIndexer {
 
     // Batch insert to database
     if (swaps.length > 0) {
+      const dbStart = Date.now();
       db.insertSwapsBatch(swaps);
-      console.log(`      ✓ Saved ${swaps.length} swaps`);
+      const dbTime = Date.now() - dbStart;
+      console.log(`      ✓ Saved ${swaps.length} swaps to database in ${dbTime}ms`);
     }
+
+    const totalTime = Date.now() - startTime;
+    const swapsPerSecond = swaps.length > 0 ? ((swaps.length / totalTime) * 1000).toFixed(0) : 0;
+    console.log(`      ⚡ Total processing time: ${totalTime}ms (${swapsPerSecond} swaps/sec)`);
   }
 
   /**
