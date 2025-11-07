@@ -308,8 +308,8 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   const effectiveStartTime = Math.max(firstTimestamp, now - maxHistorySeconds);
   const startTime = Math.floor(effectiveStartTime / intervalSeconds) * intervalSeconds;
 
-  // End at the most recent candle with data + a few hours ahead
-  const endTime = Math.floor(Math.max(newestTimestamp, now - (intervalSeconds * 10)) / intervalSeconds) * intervalSeconds;
+  // End at current time so charts always show up-to-date state
+  const endTime = Math.floor(now / intervalSeconds) * intervalSeconds;
 
   const timeRangeDays = (endTime - startTime) / (24 * 60 * 60);
   const maxCandles = Math.ceil((endTime - startTime) / intervalSeconds);
