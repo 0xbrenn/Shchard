@@ -300,7 +300,7 @@ async function indexTokenSwaps(tokenAddress, fromBlock = null) {
   const lastIndexed = db.getLastIndexedBlock(tokenAddress);
 
   const currentBlock = await provider.getBlockNumber();
-  const startBlock = fromBlock || lastIndexed || Math.max(0, currentBlock - 50000); // Last 50k blocks
+  const startBlock = fromBlock || lastIndexed || Math.max(0, currentBlock - 200000); // Last 200k blocks
 
   console.log(`  Fetching from block ${startBlock} to ${currentBlock}`);
 
@@ -373,7 +373,7 @@ async function discoverAndIndexAllPairs() {
 
     // Get current block
     const currentBlock = await provider.getBlockNumber();
-    const startBlock = Math.max(0, currentBlock - 100000); // Go back 100k blocks
+    const startBlock = Math.max(0, currentBlock - 200000); // Go back 200k blocks
 
     for (let i = 0; i < pairCount; i++) {
       try {
