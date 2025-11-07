@@ -686,7 +686,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
 
     // Try to get pre-calculated candles from database
     const candleStartTime = Date.now();
-    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 1000);
+    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 100000);
     console.log(`   Found ${candles.length} pre-calculated ${timeframe} candles in database`);
 
     if (candles.length === 0) {

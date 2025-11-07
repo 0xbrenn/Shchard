@@ -391,7 +391,7 @@ function buildCandlesInRange(tokenAddress, timeframe, intervalSeconds, swapCandl
   return candleArray;
 }
 
-function getCandles(tokenAddress, timeframe, limit = 1000) {
+function getCandles(tokenAddress, timeframe, limit = 100000) {
   const candles = candleQueries.getByTokenAndTimeframe.all(tokenAddress, timeframe, limit);
   // Query returns newest first (DESC), reverse to get chronological order for frontend
   return candles.reverse();

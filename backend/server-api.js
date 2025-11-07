@@ -117,7 +117,7 @@ app.get('/api/chart/:tokenAddress', async (req, res) => {
     }
 
     // Get or build candles
-    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 1000);
+    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 100000);
 
     if (candles.length === 0) {
       const intervalSeconds = timeframeMap[timeframe] || 3600;
