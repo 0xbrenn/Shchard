@@ -138,7 +138,9 @@ export class LogIndexer {
         console.log(`   Found ${logs.length} events`);
 
         // Process all logs
-        await this.processLogs(logs);
+        // Treat the last batch (most recent blocks) as real-time to enable live broadcasting
+        const isNearRealtime = (endBlock - toBlock) < BATCH_SIZE;
+        await this.processLogs(logs, isNearRealtime);
 
         // Update progress
         db.setLastIndexedBlockGlobal(toBlock);
@@ -149,7 +151,9 @@ export class LogIndexer {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      console.log(`✅ Historical indexing complete: ${endBlock - startBlock} blocks processed`);
+      console.log(`\n✅ Historical indexing complete: ${endBlock - startBlock} blocks processed`);
+      console.log(`   📊 Database is now up-to-date with chain`);
+      console.log(`   🔄 Transitioning to real-time mode...\n`);
     } catch (error) {
       console.error('❌ Historical indexing error:', error.message);
       console.log(`   Progress saved at block ${fromBlock - 1}`);
@@ -240,8 +244,12 @@ export class LogIndexer {
       }, 30000); // Check every 30 seconds
 
       this.isRealtime = true;
-      console.log('✅ Real-time indexing started');
-      console.log('   Keepalive: Checking connection health every 30s');
+      console.log('\n🟢 ========================');
+      console.log('🟢 REAL-TIME MODE ACTIVE');
+      console.log('🟢 ========================');
+      console.log('   📡 WebSocket connected and listening for new blocks');
+      console.log('   ✅ Live swaps will be broadcast to frontend');
+      console.log('   💓 Keepalive: Checking connection health every 30s\n');
 
       // Handle disconnections
       if (this.wsProvider.websocket) {
@@ -519,6 +527,7 @@ export class LogIndexer {
         // Broadcast real-time swaps to frontend via callback
         if (isRealtime && this.onNewSwap) {
           this.onNewSwap(swap);
+          console.log(`      📡 Broadcasting live swap: ${swap.tokenAddress} @ $${swap.price.toFixed(8)}`);
         }
       } catch (error) {
         console.error(`      ✗ Error processing Swap at ${log.transactionHash}:`, error.message);
