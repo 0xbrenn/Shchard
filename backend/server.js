@@ -1,0 +1,966 @@
+import { ethers } from 'ethers';
+import express from 'express';
+import cors from 'cors';
+import { WebSocketServer } from 'ws';
+import http from 'http';
+import dotenv from 'dotenv';
+import * as db from './database.js';
+import { LogIndexer } from './indexer.js';
+
+dotenv.config();
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+app.use(cors());
+app.use(express.json());
+
+// Initialize database
+db.initializeDatabase();
+console.log('✅ Database ready');
+
+// Configuration
+const OPN_RPC = process.env.OPN_RPC || 'https://testnet-rpc.iopn.tech';
+const OPN_WS = process.env.OPN_WS || 'wss://testnet-rpc.iopn.tech/ws';
+const OPN_PRICE = 0.05;
+const FACTORY_ADDRESS = '0x8860242B65611dfd077aEe26C3C7920813dF9208';
+const WOPN_ADDRESS = '0xBc022C9dEb5AF250A526321d16Ef52E39b4DBD84';
+
+// Initialize log-based indexer
+const indexer = new LogIndexer({
+  rpcUrl: OPN_RPC,
+  wsUrl: OPN_WS,
+  factoryAddress: FACTORY_ADDRESS,
+  wopnAddress: WOPN_ADDRESS,
+  opnPrice: OPN_PRICE,
+  deploymentBlockOffset: 100000, // Start indexing from 100k blocks ago (when DEX was deployed)
+  onNewSwap: (swap) => {
+    console.log(`📡 New swap: ${swap.tokenAddress} - $${swap.price.toFixed(8)}`);
+
+    // Update all candles (1M, 5M, 15M, 1H, 4H, 1D) in real-time
+    const updatedCandles = db.updateCandlesWithSwap(swap);
+    console.log(`   ✅ Updated ${updatedCandles.length} candles in database`);
+
+    // Broadcast new swap to all connected WebSocket clients
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // OPEN
+        // Send swap update
+        client.send(JSON.stringify({
+          type: 'swap',
+          tokenAddress: swap.tokenAddress,
+          data: {
+            timestamp: swap.timestamp,
+            price: swap.price,
+            volume: swap.volume,
+            blockNumber: swap.blockNumber,
+            txHash: swap.txHash,
+            type: swap.type,
+            tokenAmount: swap.tokenAmount,
+            wopnAmount: swap.wopnAmount
+          }
+        }));
+
+        // Send candle updates (so charts update in real-time)
+        client.send(JSON.stringify({
+          type: 'candles:update',
+          tokenAddress: swap.tokenAddress,
+          candles: updatedCandles.map(c => ({
+            timeframe: c.timeframe,
+            time: c.timestamp,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume
+          }))
+        }));
+      }
+    });
+  }
+});
+
+const PAIR_ABI = [
+  'function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)',
+  'function token0() view returns (address)',
+  'function token1() view returns (address)',
+  'event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)'
+];
+
+const FACTORY_ABI = [
+  'function getPair(address tokenA, address tokenB) view returns (address pair)',
+  'function allPairs(uint256 index) view returns (address pair)',
+  'function allPairsLength() view returns (uint256)',
+  'event PairCreated(address indexed token0, address indexed token1, address pair, uint256)'
+];
+
+const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)'
+];
+
+// Pair cache for fast lookups
+const pairCache = new Map(); // tokenAddress -> pairAddress
+const tokenMetadataCache = new Map(); // tokenAddress -> {name, symbol, decimals}
+
+// HTTP provider for queries
+const provider = new ethers.JsonRpcProvider(OPN_RPC);
+
+// WebSocket provider for real-time
+let wsProvider = null;
+
+async function connectWebSocket() {
+  // Don't crash on connection errors - real-time features will just be disabled
+  try {
+    if (wsProvider) {
+      try {
+        wsProvider.destroy();
+      } catch (e) {
+        // Ignore destroy errors
+      }
+    }
+
+    wsProvider = new ethers.WebSocketProvider(OPN_WS);
+
+    // Access the underlying WebSocket for close event (ethers.js v6 fix)
+    if (wsProvider.websocket) {
+      wsProvider.websocket.on('close', () => {
+        console.log('⚠️ WebSocket closed, reconnecting in 5 seconds...');
+        wsProvider = null;
+        setTimeout(async () => {
+          await connectWebSocket();
+          // Re-subscribe to all tokens after reconnect
+          await resubscribeAll();
+        }, 5000);
+      });
+    }
+
+    // Handle provider-level errors
+    wsProvider.on('error', (error) => {
+      console.error('❌ WebSocket provider error:', error.message);
+    });
+
+    // Wait a bit to see if connection succeeds
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log('✅ WebSocket connected to OPN Chain');
+  } catch (error) {
+    console.error('❌ WebSocket connection failed:', error.code || error.message);
+    console.log('⚠️ Real-time features will be disabled. API will still work for historical data.');
+    wsProvider = null;
+    // Try again in 30 seconds
+    setTimeout(connectWebSocket, 30000);
+  }
+}
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error.message);
+  if (error.code === 'EAI_AGAIN' || error.code === 'ENOTFOUND') {
+    console.log('⚠️ Network error, continuing with limited functionality');
+  }
+});
+
+// Find pair for token
+async function findPair(tokenAddress) {
+  if (pairCache.has(tokenAddress.toLowerCase())) {
+    return pairCache.get(tokenAddress.toLowerCase());
+  }
+
+  const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
+  const pairAddress = await factory.getPair(tokenAddress, WOPN_ADDRESS);
+
+  if (pairAddress && pairAddress !== ethers.ZeroAddress) {
+    pairCache.set(tokenAddress.toLowerCase(), pairAddress);
+    return pairAddress;
+  }
+
+  return null;
+}
+
+// Fetch and cache token metadata (name, symbol, decimals)
+async function fetchTokenMetadata(tokenAddress) {
+  const lowerToken = tokenAddress.toLowerCase();
+
+  // Check cache first
+  if (tokenMetadataCache.has(lowerToken)) {
+    return tokenMetadataCache.get(lowerToken);
+  }
+
+  // Check database
+  const dbToken = db.getToken(lowerToken);
+  if (dbToken && dbToken.symbol) {
+    const metadata = {
+      name: dbToken.name,
+      symbol: dbToken.symbol,
+      decimals: dbToken.decimals
+    };
+    tokenMetadataCache.set(lowerToken, metadata);
+    return metadata;
+  }
+
+  // Fetch from blockchain
+  try {
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const [name, symbol, decimalsRaw] = await Promise.all([
+      tokenContract.name().catch(() => 'Unknown'),
+      tokenContract.symbol().catch(() => 'UNKNOWN'),
+      tokenContract.decimals().catch(() => 18)
+    ]);
+
+    // Convert BigInt to Number for JSON serialization
+    const decimals = typeof decimalsRaw === 'bigint' ? Number(decimalsRaw) : decimalsRaw;
+
+    const metadata = { name, symbol, decimals };
+
+    // Save to database
+    const pairAddress = await findPair(tokenAddress);
+    db.upsertToken(lowerToken, name, symbol, decimals, pairAddress);
+
+    // Cache it
+    tokenMetadataCache.set(lowerToken, metadata);
+
+    console.log(`📋 Fetched metadata for ${tokenAddress}: ${symbol} (${name})`);
+    return metadata;
+  } catch (error) {
+    console.error(`Failed to fetch metadata for ${tokenAddress}:`, error.message);
+    // Return fallback
+    const metadata = { name: 'Unknown Token', symbol: 'UNKNOWN', decimals: 18 };
+    tokenMetadataCache.set(lowerToken, metadata);
+    return metadata;
+  }
+}
+
+// Process swap event into standardized format
+async function processSwapEvent(event, tokenAddress, isToken0) {
+  try {
+    const block = await event.getBlock();
+    const args = event.args;
+
+    const amount0In = args[1];
+    const amount1In = args[2];
+    const amount0Out = args[3];
+    const amount1Out = args[4];
+
+    const isBuy = isToken0 ? amount0Out > 0n : amount1Out > 0n;
+    const tokenAmount = isToken0
+      ? (isBuy ? amount0Out : amount0In)
+      : (isBuy ? amount1Out : amount1In);
+    const wopnAmount = isToken0
+      ? (isBuy ? amount1In : amount1Out)
+      : (isBuy ? amount0In : amount0Out);
+
+    const tokenAmountNum = Number(tokenAmount) / 1e18;
+    const wopnAmountNum = Number(wopnAmount) / 1e18;
+
+    if (tokenAmountNum === 0 || wopnAmountNum === 0) return null;
+
+    const priceInWOPN = wopnAmountNum / tokenAmountNum;
+    const priceInUSD = priceInWOPN * OPN_PRICE;
+    const volumeUSD = wopnAmountNum * OPN_PRICE;
+
+    return {
+      timestamp: block.timestamp,
+      price: priceInUSD,
+      volume: volumeUSD,
+      blockNumber: block.number,
+      txHash: event.log?.transactionHash || event.transactionHash,
+      type: isBuy ? 'buy' : 'sell',
+      tokenAmount: tokenAmountNum,
+      wopnAmount: wopnAmountNum
+    };
+  } catch (error) {
+    console.error('Error processing swap:', error);
+    return null;
+  }
+}
+
+// Index historical swaps for a token
+async function indexTokenSwaps(tokenAddress, fromBlock = null) {
+  console.log(`📊 Indexing swaps for ${tokenAddress}...`);
+
+  const pairAddress = await findPair(tokenAddress);
+  if (!pairAddress) {
+    console.log('No pair found');
+    return;
+  }
+
+  const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
+  const token0 = await pairContract.token0();
+  const token1 = await pairContract.token1();
+  const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
+
+  // Check if we've already indexed this token
+  const lastIndexed = db.getLastIndexedBlock(tokenAddress);
+
+  const currentBlock = await provider.getBlockNumber();
+  const startBlock = fromBlock || lastIndexed || Math.max(0, currentBlock - 200000); // Last 200k blocks
+
+  console.log(`  Fetching from block ${startBlock} to ${currentBlock}`);
+
+  // Save pair info to database
+  db.upsertPair({
+    address: pairAddress,
+    token0,
+    token1,
+    token0Symbol: isToken0 ? 'TOKEN' : 'WOPN',
+    token1Symbol: isToken0 ? 'WOPN' : 'TOKEN',
+    reserve0: '0',
+    reserve1: '0'
+  });
+
+  const filter = pairContract.filters.Swap();
+  const CHUNK_SIZE = 10000; // OPN Chain limit
+  const allEvents = [];
+
+  // Fetch in chunks to respect RPC limits
+  for (let from = startBlock; from <= currentBlock; from += CHUNK_SIZE) {
+    const to = Math.min(from + CHUNK_SIZE - 1, currentBlock);
+    console.log(`    Chunk: ${from} to ${to}`);
+
+    try {
+      const events = await pairContract.queryFilter(filter, from, to);
+      allEvents.push(...events);
+    } catch (error) {
+      console.error(`    Failed to fetch chunk ${from}-${to}:`, error.message);
+    }
+  }
+
+  const swapsToInsert = [];
+  for (const event of allEvents) {
+    const swap = await processSwapEvent(event, tokenAddress, isToken0);
+    if (swap) {
+      swapsToInsert.push({
+        txHash: swap.txHash,
+        pairAddress: pairAddress,
+        tokenAddress: tokenAddress.toLowerCase(),
+        blockNumber: swap.blockNumber,
+        timestamp: swap.timestamp,
+        price: swap.price,
+        volume: swap.volume,
+        type: swap.type,
+        tokenAmount: swap.tokenAmount,
+        wopnAmount: swap.wopnAmount
+      });
+    }
+  }
+
+  // Batch insert swaps into database
+  if (swapsToInsert.length > 0) {
+    db.insertSwapsBatch(swapsToInsert);
+  }
+
+  console.log(`✅ Indexed ${swapsToInsert.length} swaps for ${tokenAddress}`);
+  return swapsToInsert;
+}
+
+// Keep track of subscribed tokens
+const subscribedTokens = new Set();
+
+// Discover all pairs from factory and index them
+async function discoverAndIndexAllPairs() {
+  try {
+    console.log('🔍 Discovering all pairs from factory...');
+    const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
+    const pairCount = await factory.allPairsLength();
+    console.log(`   Found ${pairCount} pairs in factory`);
+
+    // Get current block
+    const currentBlock = await provider.getBlockNumber();
+    const startBlock = Math.max(0, currentBlock - 200000); // Go back 200k blocks
+
+    for (let i = 0; i < pairCount; i++) {
+      try {
+        const pairAddress = await factory.allPairs(i);
+        const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
+
+        const token0 = await pairContract.token0();
+        const token1 = await pairContract.token1();
+
+        // Determine which token is WOPN
+        const isToken0WOPN = token0.toLowerCase() === WOPN_ADDRESS.toLowerCase();
+        const isToken1WOPN = token1.toLowerCase() === WOPN_ADDRESS.toLowerCase();
+
+        if (!isToken0WOPN && !isToken1WOPN) {
+          console.log(`   Skipping pair ${i}: No WOPN token`);
+          continue;
+        }
+
+        const tokenAddress = isToken0WOPN ? token1 : token0;
+        console.log(`   [${i + 1}/${pairCount}] Indexing pair ${pairAddress.substring(0, 10)}... (token: ${tokenAddress.substring(0, 10)}...)`);
+
+        // Cache the pair
+        pairCache.set(tokenAddress.toLowerCase(), pairAddress);
+
+        // Fetch and cache token metadata
+        await fetchTokenMetadata(tokenAddress);
+
+        // Index swaps for this token from 100k blocks ago
+        await indexTokenSwaps(tokenAddress, startBlock);
+
+        // Subscribe to real-time swaps
+        await subscribeToRealTimeSwaps(tokenAddress);
+
+      } catch (error) {
+        console.error(`   Error processing pair ${i}:`, error.message);
+      }
+    }
+
+    console.log(`✅ Finished indexing all pairs`);
+  } catch (error) {
+    console.error('Error discovering pairs:', error.message);
+  }
+}
+
+// Re-subscribe to all tokens after WebSocket reconnect
+async function resubscribeAll() {
+  if (subscribedTokens.size === 0) return;
+
+  console.log(`🔄 Re-subscribing to ${subscribedTokens.size} tokens after reconnect...`);
+  const tokens = Array.from(subscribedTokens);
+  subscribedTokens.clear(); // Clear so we can re-subscribe
+
+  for (const tokenAddress of tokens) {
+    await subscribeToRealTimeSwaps(tokenAddress);
+  }
+  console.log(`✅ Re-subscribed to all tokens`);
+}
+
+// Subscribe to real-time swaps
+async function subscribeToRealTimeSwaps(tokenAddress) {
+  try {
+    const lowerToken = tokenAddress.toLowerCase();
+
+    // Don't subscribe twice
+    if (subscribedTokens.has(lowerToken)) {
+      console.log(`✓ Already subscribed to ${tokenAddress}`);
+      return;
+    }
+
+    if (!wsProvider) {
+      console.log(`⚠️ WebSocket not connected, will retry subscription for ${tokenAddress} later`);
+      // Retry after 10 seconds
+      setTimeout(() => subscribeToRealTimeSwaps(tokenAddress), 10000);
+      return;
+    }
+
+    const pairAddress = await findPair(tokenAddress);
+    if (!pairAddress) {
+      console.log(`⚠️ No pair found for ${tokenAddress}`);
+      return;
+    }
+
+    console.log(`🔍 Setting up listener for pair ${pairAddress} (token: ${tokenAddress})`);
+
+    const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, wsProvider);
+    const token0 = await pairContract.token0();
+    const token1 = await pairContract.token1();
+    const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
+
+    console.log(`   Token0: ${token0}`);
+    console.log(`   Token1: ${token1}`);
+    console.log(`   Watching token: ${tokenAddress} (is token${isToken0 ? '0' : '1'})`);
+
+    pairContract.on('Swap', async (...args) => {
+      console.log(`📡 Swap event received on pair ${pairAddress}`);
+      const event = args[args.length - 1];
+      const swap = await processSwapEvent(event, tokenAddress, isToken0);
+
+      if (swap) {
+        console.log(`🔥 New swap detected for ${tokenAddress}:`, {
+          price: swap.price,
+          volume: swap.volume,
+          type: swap.type,
+          txHash: swap.txHash
+        });
+
+        // Save to database
+        const swapData = {
+          txHash: swap.txHash,
+          pairAddress,
+          tokenAddress: tokenAddress.toLowerCase(),
+          blockNumber: swap.blockNumber,
+          timestamp: swap.timestamp,
+          price: swap.price,
+          volume: swap.volume,
+          type: swap.type,
+          tokenAmount: swap.tokenAmount,
+          wopnAmount: swap.wopnAmount
+        };
+
+        try {
+          db.insertSwap(swapData);
+          console.log(`💾 Saved swap to database`);
+        } catch (error) {
+          // Ignore duplicate errors
+          if (!error.message.includes('UNIQUE')) {
+            console.error('Error saving swap:', error.message);
+          }
+        }
+
+        // Broadcast to all connected WebSocket clients
+        const clientCount = wss.clients.size;
+        broadcastSwap(tokenAddress, swap);
+        console.log(`📤 Broadcast to ${clientCount} WebSocket clients`);
+      } else {
+        console.log(`⚠️ Swap event processed but returned null`);
+      }
+    });
+
+    subscribedTokens.add(lowerToken);
+    console.log(`🔌 Subscribed to real-time swaps for ${tokenAddress} at pair ${pairAddress}`);
+  } catch (error) {
+    console.error(`Failed to subscribe to swaps for ${tokenAddress}:`, error.message);
+    // Retry after 10 seconds
+    setTimeout(() => subscribeToRealTimeSwaps(tokenAddress), 10000);
+  }
+}
+
+// Broadcast swap to WebSocket clients
+function broadcastSwap(tokenAddress, swap) {
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(JSON.stringify({
+        type: 'swap',
+        tokenAddress,
+        data: swap
+      }));
+    }
+  });
+}
+
+// Build OHLCV candles from swaps
+function buildCandles(swaps, intervalSeconds) {
+  if (swaps.length === 0) return [];
+
+  const candles = [];
+  const firstTimestamp = swaps[0].timestamp;
+  const now = Math.floor(Date.now() / 1000);
+  const lastTimestamp = Math.max(swaps[swaps.length - 1].timestamp, now - (intervalSeconds * 100)); // Extend to recent time
+  const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
+  const endTime = Math.floor(lastTimestamp / intervalSeconds) * intervalSeconds;
+
+  let previousClose = swaps[0].price;
+
+  for (let time = startTime; time <= endTime; time += intervalSeconds) {
+    const periodEnd = time + intervalSeconds;
+    const periodSwaps = swaps.filter(s => s.timestamp >= time && s.timestamp < periodEnd);
+
+    if (periodSwaps.length === 0) {
+      // No swaps in this period - use previous close price
+      candles.push({
+        time,
+        open: previousClose,
+        high: previousClose,
+        low: previousClose,
+        close: previousClose,
+        volume: 0
+      });
+    } else {
+      const open = periodSwaps[0].price;
+      const close = periodSwaps[periodSwaps.length - 1].price;
+      const high = Math.max(...periodSwaps.map(s => s.price));
+      const low = Math.min(...periodSwaps.map(s => s.price));
+      const volume = periodSwaps.reduce((sum, s) => sum + s.volume, 0);
+
+      candles.push({ time, open, high, low, close, volume });
+      previousClose = close;
+    }
+  }
+
+  return candles;
+}
+
+// Mock data generators for testing when RPC is unavailable
+function generateMockCandles(count) {
+  const now = Math.floor(Date.now() / 1000);
+  const candles = [];
+  let price = 0.00075; // Starting price
+
+  for (let i = count; i > 0; i--) {
+    const time = now - (i * 3600); // 1 hour intervals
+    const open = price;
+    const change = (Math.random() - 0.5) * 0.00002; // +/- 0.00001
+    const close = price + change;
+    const high = Math.max(open, close) * (1 + Math.random() * 0.02);
+    const low = Math.min(open, close) * (1 - Math.random() * 0.02);
+    const volume = Math.random() * 1000 + 100;
+
+    candles.push({ time, open, high, low, close, volume });
+    price = close;
+  }
+
+  return candles;
+}
+
+function generateMockTransactions(count) {
+  const now = Math.floor(Date.now() / 1000);
+  const transactions = [];
+  let price = 0.00075;
+
+  for (let i = 0; i < count; i++) {
+    const type = Math.random() > 0.5 ? 'buy' : 'sell';
+    const timestamp = now - (i * 60); // 1 minute apart
+    const change = (Math.random() - 0.5) * 0.00001;
+    price = Math.max(0.0001, price + change);
+    const tokenAmount = Math.random() * 10000 + 1000;
+    const wopnAmount = tokenAmount * price;
+    const volume = wopnAmount;
+
+    transactions.push({
+      timestamp,
+      price,
+      volume,
+      blockNumber: 1000000 + i,
+      txHash: `0x${Math.random().toString(16).substring(2, 66)}`,
+      type,
+      tokenAmount,
+      wopnAmount
+    });
+  }
+
+  return transactions;
+}
+
+// API Routes
+
+// Get chart data
+app.get('/api/chart/:tokenAddress', async (req, res) => {
+  try {
+    const { tokenAddress } = req.params;
+    const { timeframe = '5M' } = req.query;
+
+    const timeframeMap = {
+      '1M': 60,
+      '5M': 5 * 60,
+      '15M': 15 * 60
+    };
+
+    // Check if we have data in database
+    console.log(`\n📊 Chart API Request: ${tokenAddress} | Timeframe: ${timeframe}`);
+    console.log(`   Database path: ${db.db.name}`);
+
+    let swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 10000);
+    console.log(`   Found ${swaps.length} swaps in database for ${tokenAddress}`);
+
+    if (swaps.length > 0) {
+      console.log(`   First swap: Block ${swaps[0].block_number}, Time: ${new Date(swaps[0].timestamp * 1000).toISOString()}, Price: $${swaps[0].price.toFixed(8)}`);
+      console.log(`   Last swap: Block ${swaps[swaps.length - 1].block_number}, Time: ${new Date(swaps[swaps.length - 1].timestamp * 1000).toISOString()}, Price: $${swaps[swaps.length - 1].price.toFixed(8)}`);
+    }
+
+    // If no swaps, check if token exists in database (might be newly discovered)
+    if (swaps.length === 0) {
+      const token = db.getToken(tokenAddress.toLowerCase());
+      if (token) {
+        console.log(`   Token found in database: ${token.symbol} - waiting for swaps to be indexed`);
+      } else {
+        console.log(`   Token not found - will be auto-indexed when first swap occurs or PairCreated event is detected`);
+      }
+
+      // Return empty data - indexer will handle it automatically
+      return res.json({
+        candles: [],
+        transactions: [],
+        tokenMetadata: {
+          name: token?.name || 'Loading...',
+          symbol: token?.symbol || 'LOADING',
+          decimals: token?.decimals || 18
+        },
+        message: token
+          ? 'Token indexed, waiting for swap data'
+          : 'Token will be automatically indexed when discovered'
+      });
+    }
+
+    // Try to get pre-calculated candles from database
+    const candleStartTime = Date.now();
+    let candles = db.getCandles(tokenAddress.toLowerCase(), timeframe, 100000);
+    console.log(`   Found ${candles.length} pre-calculated ${timeframe} candles in database`);
+
+    if (candles.length === 0) {
+      // No cached candles - start progressive build
+      const intervalSeconds = timeframeMap[timeframe] || 3600;
+      const buildJob = `${tokenAddress.toLowerCase()}-${timeframe}-${Date.now()}`;
+
+      console.log(`   🏗️  Starting progressive build: ${buildJob}`);
+
+      // Get transactions immediately while candles build
+      const rawTransactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
+      const transactions = rawTransactions.map(tx => ({
+        txHash: tx.tx_hash,
+        pairAddress: tx.pair_address,
+        tokenAddress: tx.token_address,
+        blockNumber: tx.block_number,
+        timestamp: tx.timestamp,
+        price: tx.price,
+        volume: tx.volume,
+        type: tx.type,
+        tokenAmount: tx.token_amount,
+        wopnAmount: tx.wopn_amount
+      }));
+
+      const token = db.getToken(tokenAddress.toLowerCase());
+      const tokenMetadata = token ? {
+        name: token.name,
+        symbol: token.symbol,
+        decimals: token.decimals
+      } : {
+        name: 'Unknown',
+        symbol: 'UNKNOWN',
+        decimals: 18
+      };
+
+      // Start progressive build in background (non-blocking)
+      setImmediate(() => {
+        db.buildCandlesProgressively(tokenAddress.toLowerCase(), timeframe, intervalSeconds, (batchData) => {
+          // Broadcast each batch to all connected WebSocket clients
+          const message = JSON.stringify({
+            type: 'candles:batch',
+            buildJob,
+            tokenAddress: tokenAddress.toLowerCase(),
+            timeframe,
+            batch: batchData
+          });
+
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) {
+              client.send(message);
+            }
+          });
+
+          console.log(`   📦 Batch ${batchData.batch}: ${batchData.candles.length} candles (${batchData.progress.percent}% complete)`);
+        });
+
+        // Send completion message
+        const completeMessage = JSON.stringify({
+          type: 'candles:complete',
+          buildJob,
+          tokenAddress: tokenAddress.toLowerCase(),
+          timeframe
+        });
+
+        wss.clients.forEach((client) => {
+          if (client.readyState === 1) {
+            client.send(completeMessage);
+          }
+        });
+
+        console.log(`   ✅ Progressive build complete: ${buildJob}`);
+      });
+
+      // Return immediately with building status
+      return res.json({
+        status: 'building',
+        buildJob,
+        candles: [],
+        transactions,
+        tokenMetadata
+      });
+    } else {
+      const cacheTime = Date.now() - candleStartTime;
+      console.log(`   ✅ Using ${candles.length} cached ${timeframe} candles (loaded in ${cacheTime}ms)`);
+      if (candles.length > 0) {
+        console.log(`   Candle range: ${new Date((candles[0].timestamp || candles[0].time) * 1000).toISOString()} to ${new Date((candles[candles.length - 1].timestamp || candles[candles.length - 1].time) * 1000).toISOString()}`);
+      }
+    }
+
+    // Ensure candles are sorted oldest to newest (ASC by time)
+    candles = candles.sort((a, b) => (a.timestamp || a.time) - (b.timestamp || b.time));
+
+    // Map candles to ensure 'time' field is set (frontend expects 'time', not 'timestamp')
+    candles = candles.map(c => ({
+      time: c.timestamp || c.time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume
+    }));
+
+    // Get recent transactions (last 50, newest first)
+    const rawTransactions = db.getTokenSwaps(tokenAddress.toLowerCase(), 50);
+
+    // Map database fields (snake_case) to frontend fields (camelCase)
+    const transactions = rawTransactions.map(tx => ({
+      txHash: tx.tx_hash,
+      pairAddress: tx.pair_address,
+      tokenAddress: tx.token_address,
+      blockNumber: tx.block_number,
+      timestamp: tx.timestamp,
+      price: tx.price,
+      volume: tx.volume,
+      type: tx.type,
+      tokenAmount: tx.token_amount,
+      wopnAmount: tx.wopn_amount
+    }));
+
+    // Get token metadata from database (indexer already saved it)
+    const token = db.getToken(tokenAddress.toLowerCase());
+    const tokenMetadata = token ? {
+      name: token.name,
+      symbol: token.symbol,
+      decimals: token.decimals
+    } : {
+      name: 'Unknown',
+      symbol: 'UNKNOWN',
+      decimals: 18
+    };
+
+    res.json({
+      status: 'complete',
+      candles, // Already sorted oldest to newest with 'time' field
+      transactions, // Mapped to camelCase for frontend
+      tokenMetadata // Include token name, symbol, decimals
+    });
+
+  } catch (error) {
+    console.error('Error fetching chart data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to inspect database state
+app.get('/api/debug/:tokenAddress', async (req, res) => {
+  try {
+    const { tokenAddress } = req.params;
+    const lowerToken = tokenAddress.toLowerCase();
+
+    const swaps = db.getTokenSwaps(lowerToken, 100);
+    const candles1M = db.getCandles(lowerToken, '1M', 50);
+    const candles1H = db.getCandles(lowerToken, '1H', 50);
+
+    res.json({
+      tokenAddress: lowerToken,
+      swapCount: swaps.length,
+      swaps: swaps.slice(0, 5), // First 5 swaps
+      candles1M: {
+        count: candles1M.length,
+        samples: candles1M.slice(0, 3)
+      },
+      candles1H: {
+        count: candles1H.length,
+        samples: candles1H.slice(0, 3)
+      }
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get token info
+app.get('/api/token/:tokenAddress', async (req, res) => {
+  try {
+    const { tokenAddress } = req.params;
+    const swaps = db.getTokenSwaps(tokenAddress.toLowerCase(), 1000);
+
+    if (swaps.length === 0) {
+      return res.json({ price: 0, volume24h: 0, lastUpdate: 0 });
+    }
+
+    const latestSwap = swaps[0]; // Newest first from DB
+    const oneDayAgo = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
+    const recent = swaps.filter(s => s.timestamp >= oneDayAgo);
+    const volume24h = recent.reduce((sum, s) => sum + s.volume, 0);
+
+    res.json({
+      price: latestSwap.price,
+      volume24h,
+      lastUpdate: latestSwap.timestamp
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Index a new token (deprecated - indexer does this automatically now)
+app.post('/api/index/:tokenAddress', async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Log-based indexer handles all tokens automatically'
+  });
+});
+
+// WebSocket connection handler (simplified - indexer handles all events)
+wss.on('connection', (ws, req) => {
+  const clientIP = req.socket.remoteAddress;
+  const clientID = Math.random().toString(36).substring(7);
+
+  console.log(`👤 New WebSocket client connected [${clientID}] from ${clientIP}`);
+  console.log(`   Total clients: ${wss.clients.size}`);
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      if (data.type === 'subscribe' && data.tokenAddress) {
+        console.log(`📡 Client [${clientID}] subscribing to ${data.tokenAddress}`);
+
+        // Check if we have data for this token
+        const swaps = db.getTokenSwaps(data.tokenAddress.toLowerCase(), 1);
+
+        ws.send(JSON.stringify({
+          type: 'subscribed',
+          tokenAddress: data.tokenAddress,
+          hasData: swaps.length > 0
+        }));
+      }
+    } catch (error) {
+      console.error(`WebSocket message error from client [${clientID}]:`, error);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log(`👋 Client [${clientID}] disconnected (remaining clients: ${wss.clients.size})`);
+  });
+
+  ws.on('error', (error) => {
+    console.error(`❌ WebSocket error from client [${clientID}]:`, error.message);
+  });
+});
+
+// Status endpoint to check indexer status
+app.get('/api/status', (req, res) => {
+  res.json({
+    indexerActive: indexer.isRealtime,
+    lastIndexedBlock: db.getLastIndexedBlockGlobal(),
+    connectedClients: wss.clients.size,
+    tokensCount: db.getAllTokens().length
+  });
+});
+
+// Start server
+const PORT = process.env.PORT || 3001;
+
+server.listen(PORT, async () => {
+  console.log(`🚀 Shchard Backend running on port ${PORT}`);
+
+  // Initialize the log-based indexer
+  setTimeout(async () => {
+    await indexer.initialize();
+  }, 1000);
+
+  // Heartbeat every 30 seconds to show we're alive
+  setInterval(() => {
+    const indexerStatus = indexer.isRealtime ? '🟢 REAL-TIME' : '🟠 HISTORICAL';
+    const allTokens = db.getAllTokens();
+    const lastBlock = db.getLastIndexedBlockGlobal();
+
+    console.log(`💓 Heartbeat - Indexer: ${indexerStatus}, Block: ${lastBlock || 'N/A'}, Tokens: ${allTokens.length}, Clients: ${wss.clients.size}`);
+
+    // Log details about connected clients
+    if (wss.clients.size > 0) {
+      const clientDetails = Array.from(wss.clients).map((client, i) => {
+        return `Client ${i + 1}: ${client.readyState === 1 ? 'OPEN' : client.readyState === 0 ? 'CONNECTING' : client.readyState === 2 ? 'CLOSING' : 'CLOSED'}`;
+      });
+      console.log(`   📡 Clients: ${clientDetails.join(', ')}`);
+    }
+  }, 30000);
+});

@@ -1,0 +1,325 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Professional Xeet.ai-Inspired Design System */
+:root {
+  /* Sophisticated Background Layers */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #0d0d0d;
+  --bg-card: #141414;
+  --bg-card-elevated: #1a1a1a;
+  --bg-card-hover: #1f1f1f;
+
+  /* Refined Accent Colors */
+  --accent-primary: #ec4899;
+  --accent-primary-glow: rgba(236, 72, 153, 0.3);
+  --accent-secondary: #8b5cf6;
+  --accent-gold: #fbbf24;
+
+  /* Professional Text Hierarchy */
+  --text-primary: #f5f5f5;
+  --text-secondary: #a3a3a3;
+  --text-tertiary: #525252;
+  --text-muted: #404040;
+
+  /* Polished Status Colors */
+  --color-positive: #10b981;
+  --color-positive-glow: rgba(16, 185, 129, 0.2);
+  --color-negative: #ef4444;
+  --color-negative-glow: rgba(239, 68, 68, 0.2);
+  --color-warning: #f59e0b;
+  --color-info: #06b6d4;
+
+  /* Sophisticated Effects */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-elevated: rgba(255, 255, 255, 0.1);
+  --shadow-soft: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-medium: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-strong: 0 12px 48px rgba(0, 0, 0, 0.6);
+  --glow-soft: 0 0 20px rgba(236, 72, 153, 0.15);
+  --border-radius: 12px;
+  --border-radius-lg: 16px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Professional Card System with Depth */
+.glass {
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(26, 26, 26, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-soft);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass:hover {
+  background: linear-gradient(135deg, var(--bg-card-hover) 0%, rgba(31, 31, 31, 0.95) 100%);
+  border-color: var(--border-elevated);
+  box-shadow: var(--shadow-medium);
+  transform: translateY(-2px);
+}
+
+.glass-strong {
+  background: linear-gradient(135deg, var(--bg-card-elevated) 0%, var(--bg-card) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-elevated);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-medium);
+}
+
+/* Professional Accent Text with Glow */
+.gradient-text {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+  filter: drop-shadow(var(--glow-soft));
+}
+
+/* Professional Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--bg-card-elevated) 0%, var(--bg-card) 100%);
+  border-radius: 5px;
+  border: 2px solid var(--bg-secondary);
+  transition: all 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--bg-card-hover) 0%, var(--bg-card-elevated) 100%);
+  box-shadow: var(--glow-soft);
+}
+
+/* Professional Button System */
+.btn-gradient {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  border-radius: var(--border-radius);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 600;
+  box-shadow: var(--shadow-soft), var(--glow-soft);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-gradient:hover {
+  background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent-primary) 100%);
+  box-shadow: var(--shadow-medium), 0 0 30px var(--accent-primary-glow);
+  transform: translateY(-2px) scale(1.02);
+}
+
+.btn-gradient:active {
+  transform: translateY(0) scale(1);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Professional Card Hover */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-elevated);
+  box-shadow: var(--shadow-strong);
+}
+
+/* Sophisticated Glow System */
+.glow-pink {
+  box-shadow: 0 0 30px var(--accent-primary-glow), var(--shadow-soft);
+}
+
+.glow-purple {
+  box-shadow: 0 0 30px rgba(139, 92, 246, 0.3), var(--shadow-soft);
+}
+
+.glow-blue {
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.3), var(--shadow-soft);
+}
+
+.glow-green {
+  box-shadow: 0 0 30px var(--color-positive-glow), var(--shadow-soft);
+}
+
+.glow-red {
+  box-shadow: 0 0 30px var(--color-negative-glow), var(--shadow-soft);
+}
+
+/* Professional Status Badges with Depth */
+.badge-positive {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%);
+  color: var(--color-positive);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-negative {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.08) 100%);
+  color: var(--color-negative);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%);
+  color: var(--color-warning);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-info {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(6, 182, 212, 0.08) 100%);
+  color: var(--color-info);
+  border: 1px solid rgba(6, 182, 212, 0.4);
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.15);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Professional Data Typography */
+.data-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.data-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Professional Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: var(--shadow-soft);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: var(--shadow-medium);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 0%,
+    var(--bg-card-elevated) 50%,
+    var(--bg-card) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Professional Utility Classes */
+.border-glow {
+  border: 1px solid var(--border-elevated);
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.1);
+}
+
+.text-positive {
+  color: var(--color-positive);
+}
+
+.text-negative {
+  color: var(--color-negative);
+}
+
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--border-subtle) 50%, transparent 100%);
+}
+
+.backdrop-blur-strong {
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+/* Hide scrollbar for horizontal scroll containers */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Mobile safe area padding */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom);
+}
