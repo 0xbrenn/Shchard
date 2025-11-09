@@ -154,7 +154,7 @@ const swapQueries = {
   getByToken: db.prepare(`
     SELECT * FROM swaps
     WHERE token_address = ?
-    ORDER BY timestamp DESC
+    ORDER BY timestamp ASC
     LIMIT ?
   `),
 
@@ -298,9 +298,9 @@ function buildAndSaveCandles(tokenAddress, timeframe, intervalSeconds) {
   // Build candles from first swap to current time for complete historical data
   const now = Math.floor(Date.now() / 1000);
 
-  // Note: swaps are ordered DESC (newest first), so swaps[swaps.length-1] is oldest
-  const firstTimestamp = swaps[swaps.length - 1].timestamp; // Oldest swap
-  const newestTimestamp = swaps[0].timestamp; // Newest swap
+  // Note: swaps are ordered ASC (oldest first), so swaps[0] is oldest
+  const firstTimestamp = swaps[0].timestamp; // Oldest swap
+  const newestTimestamp = swaps[swaps.length - 1].timestamp; // Newest swap
 
   // Start from the very first swap
   const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
@@ -458,7 +458,7 @@ function buildCandlesProgressively(tokenAddress, timeframe, intervalSeconds, onB
 
   // Calculate time range - build from first swap to now for complete history
   const now = Math.floor(Date.now() / 1000);
-  const firstTimestamp = swaps[swaps.length - 1].timestamp;
+  const firstTimestamp = swaps[0].timestamp; // Swaps are now ASC, so first is at index 0
   const startTime = Math.floor(firstTimestamp / intervalSeconds) * intervalSeconds;
   const endTime = Math.floor(now / intervalSeconds) * intervalSeconds;
 
