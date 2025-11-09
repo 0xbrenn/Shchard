@@ -307,13 +307,17 @@ export class LogIndexer {
       });
       logs.push(...swapLogs);
 
-      // Get Sync events (for reserve updates)
+      // Skip Sync events - they exceed 10k result limit and aren't currently used
+      // Sync events update pair reserves but we calculate those from swaps
+      // Uncomment below if you need Sync events in the future (may need smaller batch sizes)
+      /*
       const syncLogs = await this.provider.getLogs({
         fromBlock,
         toBlock,
         topics: [EVENT_SIGNATURES.Sync]
       });
       logs.push(...syncLogs);
+      */
 
     } catch (error) {
       console.error(`Error fetching logs for blocks ${fromBlock}-${toBlock}:`, error.message);
@@ -384,6 +388,7 @@ export class LogIndexer {
 
         // Only process pairs with WOPN
         if (token0 !== this.wopnAddress && token1 !== this.wopnAddress) {
+          console.log(`      ⊘ Skipping non-WOPN pair: ${pairAddress.substring(0, 10)}...`);
           continue;
         }
 
@@ -405,7 +410,7 @@ export class LogIndexer {
         });
 
         // Save to database
-        db.upsertToken({
+        const upsertResult = db.upsertToken({
           address: tokenAddress,
           name: metadata.name,
           symbol: metadata.symbol,
@@ -413,11 +418,15 @@ export class LogIndexer {
           pairAddress
         });
 
-        console.log(`      ✓ Pair created: ${metadata.symbol}/${isToken0 ? 'WOPN' : 'WOPN'} at ${pairAddress.substring(0, 10)}...`);
+        console.log(`      ✓ Pair created: ${metadata.symbol}/WOPN at ${pairAddress.substring(0, 10)}...`);
+        console.log(`         Token saved to DB: ${tokenAddress.substring(0, 10)}... (${metadata.symbol})`);
       } catch (error) {
         console.error(`      ✗ Error processing PairCreated:`, error.message);
+        console.error(`         Full error:`, error);
       }
     }
+
+    console.log(`      ✅ Processed ${logs.length} PairCreated events`);
   }
 
   /**
